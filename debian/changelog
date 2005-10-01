@@ -1,3 +1,9 @@
+connect-proxy (1.95-3) unstable; urgency=low
+
+  * Re-uploaded with all the changelog so the ITP are correctly closed 
+
+ -- Christian Bayle <bayle@debian.org>  Sat,  1 Oct 2005 23:59:05 +0200
+
 connect-proxy (1.95-2) unstable; urgency=low
 
   * more detailed example in manpage
