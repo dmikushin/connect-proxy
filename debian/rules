@@ -25,38 +25,30 @@ build: build-stamp
 
 build-stamp:
 	dh_testdir
-
-	# Add here commands to compile the package.
 	$(MAKE)
 	docbook-to-man debian/connect-proxy.sgml > debian/connect-proxy.1
-
+	cd debian && ln -fs connect-proxy.1 connect.1
 	touch build-stamp
 
 clean:
 	dh_testdir
 	dh_testroot
-	rm -f build-stamp
-
-	# Add here commands to clean up after the build process.
+	-rm -f build-stamp
 	-$(MAKE) clean
-
-	dh_clean 
+	-dh_clean 
+	-rm debian/*.1
 
 install: build
 	dh_testdir
 	dh_testroot
 	dh_clean -k 
 	dh_installdirs
-
-	# Add here commands to install the package into debian/connect-proxy.
 	$(MAKE) install DESTDIR=$(CURDIR)/debian/connect-proxy
 
 
-# Build architecture-independent files here.
 binary-indep: build install
-# We have nothing to do by default.
 
-# Build architecture-dependent files here.
+
 binary-arch: build install
 	dh_testdir
 	dh_testroot

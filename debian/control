@@ -1,10 +1,10 @@
 Source: connect-proxy
 Section: net
 Priority: optional
-Maintainer: Philippe COVAL <Philippe.COVAL@laposte.net>
+Maintainer: Philippe Coval <rzr@users.sf.net>
 Uploaders: Christian Bayle <bayle@debian.org>
 Build-Depends: debhelper (>= 4.0.0), docbook-to-man
-Standards-Version: 3.6.2
+Standards-Version: 3.7.2
 
 Package: connect-proxy
 Architecture: any

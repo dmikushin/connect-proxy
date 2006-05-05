@@ -18,14 +18,14 @@ manpage.1: manpage.sgml
 
   <!-- Fill in your name for FIRSTNAME and SURNAME. -->
   <!ENTITY dhfirstname "<firstname>Philippe</firstname>">
-  <!ENTITY dhsurname   "<surname>COVAL</surname>">
+  <!ENTITY dhsurname   "<surname>Coval</surname>">
   <!-- Please adjust the date whenever revising the manpage. -->
   <!ENTITY dhdate      "<date>April 22, 2005</date>">
   <!-- SECTION should be 1-8, maybe w/ subsection other parameters are
        allowed: see man(7), man(1). -->
   <!ENTITY dhsection   "<manvolnum>1</manvolnum>">
-  <!ENTITY dhemail     "<email>Philippe.COVAL@laposte.net</email>">
-  <!ENTITY dhusername  "Philippe COVAL">
+  <!ENTITY dhemail     "<email>rzr@users.sf.net</email>">
+  <!ENTITY dhusername  "Philippe Coval">
   <!ENTITY dhucpackage "<refentrytitle>CONNECT-PROXY</refentrytitle>">
   <!ENTITY dhpackage   "connect-proxy">
 
@@ -237,19 +237,18 @@ HTTP_PROXY=proxy-server:8080; export HTTP_PROXY;
 
 <para>
  To use it along ssh transparently:
-<command>
+
+<programlisting>
  # file://~/.ssh/config
  # not using proxy on lan
  Host 192.*
  ProxyCommand &dhpackage; %h %p
  # mandatory to access the internet
  Host *
- ProxyCommand &dhpackage; -H proxy-server:8080  %h %p
+ ProxyCommand &dhpackage; -H proxyserver:8080  %h %p
+</programlisting>
 
-</command>
-
-Or on for all users ( /etc/ssh/ssh_config )
-
+Or for all users ( /etc/ssh/ssh_config )
 
 </para>
 

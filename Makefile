@@ -8,14 +8,15 @@ OBJS ?= connect.o
 default: ${PACKAGE} 
 
 install: ${PACKAGE}
-	 -mkdir -p ${INSTALL_DIR}/bin/
-	 install -s ${PACKAGE} ${INSTALL_DIR}/bin/
+	-mkdir -p ${INSTALL_DIR}/bin/
+	install -s ${PACKAGE} ${INSTALL_DIR}/bin/
+	ln -fs ${PACKAGE} ${INSTALL_DIR}/bin/connect
 
 
 ${PACKAGE}: ${OBJS}
 	    ${CC} -o $@ $^
 clean: 
-	${RM} ${PACKAGE} ${PACKAGE}.o *~ ${OBJS}
+	-${RM} ${PACKAGE} ${PACKAGE}.o *~ ${OBJS}
 
 # connect.c:
 #	wget ${URL}
@@ -23,4 +24,4 @@ clean:
 LICENCE: /usr/share/apps/LICENSES/GPL_V2
 	ln -fs $^ $@
 
-# EOF
+#eof "$Id: rzr@users.sf.net $"

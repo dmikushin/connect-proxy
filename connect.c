@@ -22,7 +22,7 @@
  * PROJECT:  My Test Program
  * AUTHOR:   Shun-ichi GOTO <gotoh@taiyo.co.jp>
  * CREATE:   Wed Jun 21, 2000
- * REVISION: $Revision: 1.95 $
+ * REVISION: $Revision: 1.96 $
  * ---------------------------------------------------------
  *
  * Getting Source
@@ -252,7 +252,7 @@
 
 
 #ifndef LINT
-static char *vcid = "$Id: connect.c,v 1.95 2005/07/08 13:27:36 gotoh Exp $";
+static char *vcid = "$Id: connect.c,v 1.96 2006/05/02 15:24:13 gotoh Exp $";
 #endif
 
 /* Microsoft Visual C/C++ has _snprintf() and _vsnprintf() */
@@ -290,7 +290,7 @@ static char *usage = "usage: %s [-dnhst45] [-p local-port]"
 /* name of this program */
 char *progname = NULL;
 char *progdesc = "connect --- simple relaying command via proxy.";
-char *rcs_revstr = "$Revision: 1.95 $";
+char *rcs_revstr = "$Revision: 1.96 $";
 char *revstr = NULL;
 
 /* set of character for strspn() */
@@ -1891,7 +1891,7 @@ readpass( const char* prompt, ...)
         /* use ssh-askpass to get password */
         FILE *fp;
         char *askpass = getparam(ENV_SSH_ASKPASS), *cmd;
-	int cmd_size = strlen(askpass) +1 +1 +strlen(buf) +1;
+	int cmd_size = strlen(askpass) +1 +1 +strlen(buf) +1 +1;
         cmd = xmalloc(cmd_size);
         snprintf(cmd, cmd_size, "%s \"%s\"", askpass, buf);
         fp = popen(cmd, "r");
@@ -2771,7 +2771,7 @@ main( int argc, char **argv )
     /* initialization */
     make_revstr();
     getarg( argc, argv );
-    debug("Program is $Revision: 1.95 $\n");
+    debug("Program is $Revision: 1.96 $\n");
 
     /* Open local_in and local_out if forwarding a port */
     if ( local_type == LOCAL_SOCKET ) {
