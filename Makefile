@@ -1,27 +1,29 @@
-#gmake
-PACKAGE ?= connect-proxy
-URL ?= http://www.taiyo.co.jp/~gotoh/ssh/connect.c
-INSTALL_DIR ?= ${DESTDIR}/usr
+#!/usr/bin/make -f
+PACKAGE?=connect-proxy
+#URL=http://www.meadowy.org/~gotoh/projects/connect/browser/trunk/connect.c?format=raw
+URL=http://www.meadowy.org/~gotoh/ssh/connect.c
+INSTALL_DIR?=${DESTDIR}/usr
+OBJS?=connect.o
 
-OBJS ?= connect.o
-
-default: ${PACKAGE} 
+all default: ${PACKAGE} 
 
 install: ${PACKAGE}
 	-mkdir -p ${INSTALL_DIR}/bin/
-	install -s ${PACKAGE} ${INSTALL_DIR}/bin/
-	ln -fs ${PACKAGE} ${INSTALL_DIR}/bin/connect
-
+	install ${PACKAGE} ${INSTALL_DIR}/bin/
+#	ln -fs ${PACKAGE} ${INSTALL_DIR}/bin/connect
 
 ${PACKAGE}: ${OBJS}
-	    ${CC} -o $@ $^
+	    ${CC} -o $@ $^ ${LDFLAGS} 
 clean: 
-	-${RM} ${PACKAGE} ${PACKAGE}.o *~ ${OBJS}
+	${RM} ${PACKAGE} ${PACKAGE}.o *~ ${OBJS} || echo "# $@: $^"
 
 # connect.c:
-#	wget ${URL}
+#	wget -O $@ "${URL}"
+
+update:
+	wget -O connect.c "${URL}"
 
 LICENCE: /usr/share/apps/LICENSES/GPL_V2
 	ln -fs $^ $@
 
-#eof "$Id: rzr@users.sf.net $"
+#eof "$Id: connect-proxy/Makefile --  rzr@users.sf.net $"

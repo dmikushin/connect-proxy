@@ -286,7 +286,7 @@ LOGNAME, USER
   <refsect1>
     <title>WWW</title>
 <para>
-http://www.taiyo.co.jp/~gotoh/ssh/connect.html
+http://www.meadowy.org/~gotoh/projects/connect
 </para>
   </refsect1>
 
@@ -326,5 +326,3 @@ sgml-local-catalogs:nil
 sgml-local-ecat-files:nil
 End:
 -->
-
-

@@ -1,7 +1,7 @@
 /***********************************************************************
  * connect.c -- Make socket connection using SOCKS4/5 and HTTP tunnel.
  *
- * Copyright (c) 2000-2004 Shun-ichi Goto
+ * Copyright (c) 2000-2006 Shun-ichi Goto
  * Copyright (c) 2002, J. Grant (English Corrections)
  *
  * This program is free software; you can redistribute it and/or
@@ -22,7 +22,7 @@
  * PROJECT:  My Test Program
  * AUTHOR:   Shun-ichi GOTO <gotoh@taiyo.co.jp>
  * CREATE:   Wed Jun 21, 2000
- * REVISION: $Revision: 1.96 $
+ * REVISION: $Revision: 100 $
  * ---------------------------------------------------------
  *
  * Getting Source
@@ -252,7 +252,7 @@
 
 
 #ifndef LINT
-static char *vcid = "$Id: connect.c,v 1.96 2006/05/02 15:24:13 gotoh Exp $";
+static char *vcid = "$Id: connect.c 100 2007-07-03 10:48:26Z gotoh $";
 #endif
 
 /* Microsoft Visual C/C++ has _snprintf() and _vsnprintf() */
@@ -290,8 +290,10 @@ static char *usage = "usage: %s [-dnhst45] [-p local-port]"
 /* name of this program */
 char *progname = NULL;
 char *progdesc = "connect --- simple relaying command via proxy.";
-char *rcs_revstr = "$Revision: 1.96 $";
+char *rcs_revstr = "$Revision: 100 $";
 char *revstr = NULL;
+int major_version = 1;
+int minor_version = 0;
 
 /* set of character for strspn() */
 const char *digits    = "0123456789";
@@ -527,14 +529,16 @@ xmalloc (size_t size)
     return ret;
 }
 
-void
-downcase( char *buf )
+char *
+downcase( char *str )
 {
+    char *buf = str;
     while ( *buf ) {
         if ( isupper(*buf) )
             *buf += 'a'-'A';
         buf++;
     }
+    return str;                                 /* return converted arg */
 }
 
 char *
@@ -787,6 +791,7 @@ getparam(const char* name)
 struct ADDRPAIR {
     struct in_addr addr;
     struct in_addr mask;
+    char *name;
     int negative;
 };
 
@@ -815,16 +820,39 @@ add_direct_addr (struct in_addr *addr, struct in_addr *mask, int negative)
     iaddr = *addr;
     mask_addr(&iaddr, mask, sizeof(iaddr));
     s = strdup(inet_ntoa(iaddr));
-    debug("adding direct address entry: %s/%s\n", s, inet_ntoa(*mask));
+    debug("adding direct addr entry: %s%s/%s\n",
+          negative? "!": "", s, inet_ntoa(*mask));
     free(s);
     memcpy( &direct_addr_list[n_direct_addr_list].addr,
             &iaddr, sizeof(iaddr));
     memcpy( &direct_addr_list[n_direct_addr_list].mask,
             mask, sizeof(*mask));
+    direct_addr_list[n_direct_addr_list].name = NULL;
     direct_addr_list[n_direct_addr_list].negative = negative;
     n_direct_addr_list++;
     return 0;
 }
+
+
+/* add domain/host name entry to direct name table */
+int
+add_direct_host( const char *name, int negative)
+{
+    if ( MAX_DIRECT_ADDR_LIST <= n_direct_addr_list ) {
+        error("direct address table is full!\n");
+        return -1;
+    }
+    if (*name == '*')
+        name++;
+    if (*name == '.')
+        name++;
+    debug("adding direct name entry: %s%s\n", negative? "!": "", name);
+    direct_addr_list[n_direct_addr_list].name = downcase(strdup(name));
+    direct_addr_list[n_direct_addr_list].negative = negative;
+    n_direct_addr_list++;
+    return 0;
+}
+
 
 int
 parse_addr_pair (const char *str, struct in_addr *addr, struct in_addr *mask)
@@ -842,7 +870,6 @@ parse_addr_pair (const char *str, struct in_addr *addr, struct in_addr *mask)
     int i, n;
 
     assert( str != NULL );
-    debug("parsing address pair: '%s'\n", str);
     addr->s_addr = 0;
     mask->s_addr = 0;
     ptr = str;
@@ -946,7 +973,7 @@ initialize_direct_addr (void)
         if ( !parse_addr_pair( beg, &addr, &mask ) ) {
             add_direct_addr( &addr, &mask, negative );
         } else {
-            error("invalid addr format in %s: %s\n", envkey, beg);
+            add_direct_host( beg, negative );
         }
         if ( next != NULL )
             beg = next;
@@ -963,34 +990,126 @@ cmp_addr (void *addr1, void *addr2, int addrlen)
 }
 
 int
-is_direct_address (const struct sockaddr_in *addr)
+is_direct_address (const struct in_addr addr)
 {
-    int i;
-    struct in_addr saddr, iaddr;
-
-    saddr = addr->sin_addr;
+    int i, neg;
+    struct in_addr iaddr;
 
     /* Note: assume IPV4 address !! */
     for (i=0; i<n_direct_addr_list; i++ ) {
-        iaddr = saddr;
+        if (direct_addr_list[i].name != NULL)
+            continue;                           /* it's name entry */
+        neg = direct_addr_list[i].negative;
+        iaddr = addr;
         mask_addr( &iaddr, &direct_addr_list[i].mask,
                    sizeof(struct in_addr));
         if (cmp_addr(&iaddr, &direct_addr_list[i].addr,
                      sizeof(struct in_addr)) == 0) {
-            if (direct_addr_list[i].negative) {
-                debug("negative match, addr to be SOCKSify: %s\n",
-                      inet_ntoa(saddr));
+            char *a, *m;
+            a = strdup(inet_ntoa(direct_addr_list[i].addr));
+            m = strdup(inet_ntoa(direct_addr_list[i].mask));
+            debug("match with: %s/%s%s\n", a, m, neg? " (negative)": "");
+            free(a);
+            free(m);
+            return !neg? 1: 0;
+        }
+    }
+    debug("not matched, addr to be relayed: %s\n", inet_ntoa(addr));
+    return 0;                   /* not direct */
+}
+
+
+/* check s1 is ends with s2.
+   return 1 if exact match or domain part match.
+   return 0 if s1 is shorter than s2 or partial match.
+   For example, 
+    ends_with("bar.com", "bar.com")        => 1 (exact match)
+    ends_with("foo.bar.com", "bar.com")    => 1 (domain match)
+    ends_with("foo.beebar.com", "bar.com") => 0 (partial match)
+    ends_with("bar", "bar.com")            => 0 (shorter)
+ */
+domain_match(const char *s1, const char *s2)
+{
+    int len1, len2;
+    const char *tail1, *tail2;
+    len1 = strlen(s1);
+    len2 = strlen(s2);
+    if (len1 < len2 || len1 == 0 || len2 == 0)
+        return 0;                               /* not match */
+    tail1 = s1 + len1;
+    tail2 = s2 + len2;
+    while (0 < len1 && 0 < len2) {
+        if (*--tail1 != *--tail2)
+            break;                              /* not match */
+        len1--, len2--;
+    }
+    if (len2 != 0)
+        return 0;                               /* not match */
+    /* Now exact match, domain match or partial match.
+       Return true if exact or domain match.
+       Or continue checking. */
+    if (tail1 == s1 || tail1[-1] == '.')
+        return 1;                               /* match! */
+    return 0;                                   /* not match */
+}
+
+/* Check given NAME is ends with one of 
+   registered direct name entry.
+   Return 1 if matched, or 0.
+*/
+int
+is_direct_name (const char *name)
+{
+    int len, i;
+    const char *tail;
+    debug("checking %s is for direct?\n", name);
+    name = downcase(strdup(name));
+    len = strlen(name);
+    if (len < 1)
+        return 0;                               /* false */
+    tail = &name[len];
+    for (i=0; i<n_direct_addr_list; i++ ) {
+        int dlen, neg;
+        const char *dname;
+        const char *n, *d;
+        dname = direct_addr_list[i].name;
+        if (dname == NULL)
+            continue;                           /* it's addr/mask entry */
+        neg = direct_addr_list[i].negative;
+        if (domain_match(name, dname)) {
+            debug("match with: %s%s\n", dname, neg? " (negative)": "");
+            if (neg) {
                 return 0;       /* not direct */
-            }
-            if (!direct_addr_list[i].negative) {
-                debug("positive match, addr to be direct: %s\n",
-                      inet_ntoa(saddr));
+            } else {
                 return 1;       /* direct*/
             }
         }
     }
-    debug("not matched, addr to be SOCKSified: %s\n", inet_ntoa(saddr));
-    return 0;                   /* not direct */
+    return 0;                                   /* not matched */
+}
+
+/* check to connect to HOST directyly?
+   return 1 if to be direct, 0 for else. */
+int
+check_direct(const char *host)
+{
+    struct in_addr addr;
+    addr.s_addr = inet_addr(host);
+    if (addr.s_addr != INADDR_NONE) {
+        /* case of IP address */
+        if (is_direct_address(addr)) {
+            debug("%s is for direct.\n", host);
+            return 1;                           /* true */
+        }
+    } else {
+        /* case of hostname */
+        if (is_direct_name(host)) {
+            debug("%s is for direct.\n", host);
+            return 1;                           /* true */
+        }
+    }
+    debug("%s is for not direct.\n", host);
+    return 0;                                    /* false */
 }
 
 
@@ -1227,17 +1346,7 @@ set_relay( int method, char *spec )
     if (n_direct_addr_list == 0) {
         debug ("No direct address are specified.\n");
     } else {
-        int i;
-        for ( i=0; i<n_direct_addr_list; i++ ) {
-            char *s1, *s2;
-            s1 = strdup(inet_ntoa(direct_addr_list[i].addr));
-            s2 = strdup(inet_ntoa(direct_addr_list[i].mask));
-            debug(" #%d: %c%s/%s\n", i,
-                  (direct_addr_list[i].negative)? '!': ' ',
-                  s1, s2);
-            free(s1);
-            free(s2);
-        }
+        debug ("%d direct address entries.\n", n_direct_addr_list);
     }
 
     switch ( method ) {
@@ -1367,12 +1476,10 @@ make_revstr(void)
         return;
     }
     ptr += 2;
-    len = strspn(ptr, dotdigits);
-    if (0 < len) {
-        revstr = xmalloc(len+1);
-        memcpy(revstr, ptr, len);
-        revstr[len] = '\0';
-    }
+    /* assume subversion's keyword expansion like "Revision: 96". */
+    minor_version = atoi(ptr);
+    revstr = xmalloc(20);
+    snprintf(revstr, 20, "%d.%d", major_version, minor_version);
 }
 
 int
@@ -1600,9 +1707,10 @@ quit:
 void
 sig_timeout(void)
 {
-    debug( "timed out\n" );
     signal( SIGALRM, SIG_IGN );
     alarm( 0 );
+    error( "timed out\n" );
+    exit(1);
 }
 
 /* set timeout param = seconds, 0 clears */
@@ -1667,20 +1775,7 @@ open_connection( const char *host, u_short port )
     SOCKET s;
     struct sockaddr_in saddr;
 
-    if ( relay_method == METHOD_DIRECT ) {
-        host = dest_host;
-        port = dest_port;
-    } else if ((local_resolve (dest_host, &saddr) >= 0)&&
-               (is_direct_address(&saddr))) {
-        debug("%s is connected directly\n", dest_host);
-        relay_method = METHOD_DIRECT;
-        host = dest_host;
-        port = dest_port;
-    } else {
-        host = relay_host;
-        port = relay_port;
-    }
-
+    /* resolve address of proxy or direct target */
     if (local_resolve (host, &saddr) < 0) {
         error("can't resolve hostname: %s\n", host);
         return SOCKET_ERROR;
@@ -2585,22 +2680,19 @@ do_repeater( SOCKET local_in, SOCKET local_out, SOCKET remote )
         /* remote => local */
         if ( FD_ISSET(remote, &ifds) && (rbuf_len < (int)sizeof(rbuf)) ) {
             len = recv( remote, rbuf + rbuf_len, sizeof(rbuf)-rbuf_len, 0);
-            if ( len == 0 ) {
-                debug("connection closed by peer\n");
+            if ( len == 0 || (len == -1 && socket_errno() == ECONNRESET)) {
+                debug("connection %s by peer\n",
+                      (len==0)? "closed": "reset");
                 close_reason = REASON_CLOSED_BY_REMOTE;
                 f_remote = 0;                   /* no more read from socket */
                 f_local = 0;
             } else if ( len == -1 ) {
-                if (socket_errno() != ECONNRESET) {
-                    /* error */
-                    fatal("recv() faield, %d\n", socket_errno());
-                } else {
-                    debug("ECONNRESET detected\n");
-                }
+                /* error */
+                fatal("recv() failed, %d\n", socket_errno());
             } else {
                 debug("recv %d bytes\n", len);
                 if ( 1 < f_debug )              /* more verbose */
-                    report_bytes( "<<<", rbuf, rbuf_len);
+                    report_bytes( "<<<", rbuf+rbuf_len, len);
                 rbuf_len += len;
             }
         }
@@ -2636,13 +2728,13 @@ do_repeater( SOCKET local_in, SOCKET local_out, SOCKET remote )
         /* flush data in buffer to socket */
         if ( 0 < lbuf_len ) {
             len = send(remote, lbuf, lbuf_len, 0);
-            if ( 1 < f_debug )          /* more verbose */
-                report_bytes( ">>>", lbuf, lbuf_len);
             if ( len == -1 ) {
                 fatal("send() failed, %d\n", socket_errno());
             } else if ( 0 < len ) {
+                if ( 1 < f_debug )              /* more verbose */
+                    report_bytes( ">>>", lbuf, len);
                 /* move data on to top of buffer */
-                debug("send %d bytes\n", len);
+                debug("sent %d bytes\n", len);
                 lbuf_len -= len;
                 if ( 0 < lbuf_len )
                     memcpy( lbuf, lbuf+len, lbuf_len );
@@ -2771,7 +2863,7 @@ main( int argc, char **argv )
     /* initialization */
     make_revstr();
     getarg( argc, argv );
-    debug("Program is $Revision: 1.96 $\n");
+    debug("Program is $Revision: 100 $\n");
 
     /* Open local_in and local_out if forwarding a port */
     if ( local_type == LOCAL_SOCKET ) {
@@ -2793,6 +2885,8 @@ retry:
         set_timeout (connect_timeout);
 #endif /* not _WIN32 */
 
+    if (check_direct(dest_host))
+        relay_method = METHOD_DIRECT;
     /* make connection */
     if ( relay_method == METHOD_DIRECT ) {
         remote = open_connection (dest_host, dest_port);
