@@ -1,11 +1,11 @@
 Source: connect-proxy
 Section: net
 Priority: optional
-Maintainer: Philippe Coval <rzr@users.sf.net>
+Maintainer: Philippe Coval <rzr@gna.org>
 Uploaders: Christian Bayle <bayle@debian.org>
-Build-Depends: debhelper (>= 4.0.0), docbook-to-man
-Standards-Version: 3.7.2
-Homepage: http://www.meadowy.org/~gotoh/projects/connect
+Build-Depends: debhelper (>= 5.0.0), docbook-to-man, quilt
+Standards-Version: 3.8.3
+Homepage: http://bitbucket.org/gotoh/connect/
 
 Package: connect-proxy
 Architecture: any

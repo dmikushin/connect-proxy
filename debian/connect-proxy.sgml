@@ -24,7 +24,7 @@ manpage.1: manpage.sgml
   <!-- SECTION should be 1-8, maybe w/ subsection other parameters are
        allowed: see man(7), man(1). -->
   <!ENTITY dhsection   "<manvolnum>1</manvolnum>">
-  <!ENTITY dhemail     "<email>rzr@users.sf.net</email>">
+  <!ENTITY dhemail     "<email>rzr@gna.org</email>">
   <!ENTITY dhusername  "Philippe Coval">
   <!ENTITY dhucpackage "<refentrytitle>CONNECT-PROXY</refentrytitle>">
   <!ENTITY dhpackage   "connect-proxy">
@@ -200,8 +200,8 @@ used for debug. If you fail to connect, use this and check request to and respon
 	<title>USAGE</title>
 	<para>
 
-  To use proxy, this example is for SOCKS5 connection to connect to
-  'host' at port 25 via SOCKS5 server on 'firewall' host.
+To use proxy, this example is for SOCKS5 connection to connect to
+"host" at port 25 via SOCKS5 server on "firewall" host.
 
 <command>
 &dhpackage; -S firewall host 25
@@ -229,9 +229,9 @@ HTTP_PROXY=proxy-server:8080; export HTTP_PROXY;
 <para>
  To forward a local port, for example to use ssh:
 
-<command>&dhpackage; -H proxy-server:8080  host 22 </command>
-
-<command>ssh -l user -p 5550 localhost</command>
+<command>
+&dhpackage; -p 5550 -H proxy-server:8080 host 22 ssh -l user
+</command>
 
 </para>
 
