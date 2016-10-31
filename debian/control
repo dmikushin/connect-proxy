@@ -3,13 +3,13 @@ Section: net
 Priority: optional
 Maintainer: Philippe Coval <rzr@gna.org>
 Uploaders: Christian Bayle <bayle@debian.org>
-Build-Depends: debhelper (>= 5.0.0), docbook-to-man, quilt
-Standards-Version: 3.8.3
+Build-Depends: debhelper (>=9), docbook-to-man
+Standards-Version: 3.9.6
 Homepage: http://bitbucket.org/gotoh/connect/
 
 Package: connect-proxy
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}
+Depends: ${misc:Depends}, ${shlibs:Depends}
 Description: Establish TCP connection using SOCKS4/5 or HTTP tunnel
  connect-proxy is a simple relaying command to make tunnel TCP connection
  via SOCKS or HTTPS proxies.
