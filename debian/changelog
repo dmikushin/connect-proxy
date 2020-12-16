@@ -1,12 +1,19 @@
 connect-proxy (1.105-1.1) UNRELEASED; urgency=medium
 
   * Non-maintainer upload.
+
+  [ Roger Shimizu ]
   * debian/control:
     - Create git repo on salsa, and add Vcs-* URL.
     - Add Rules-Requires-Root: no
   * debian/copyright:
     - Use secure copyright file specification URI.
     - Remove Makefile entry, which does not exist.
+
+  [ Helmut Grohne ]
+  * Fix FTCBFS: (Closes: #901453)
+    + Let dpkg's buildtools.mk set up $(CC).
+    + Don't hard code gcc.
 
  -- Roger Shimizu <rosh@debian.org>  Thu, 17 Dec 2020 00:57:52 +0900
 

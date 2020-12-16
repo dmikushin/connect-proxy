@@ -1,15 +1,15 @@
 #!/usr/bin/make -f
 
+-include /usr/share/dpkg/buildtools.mk
+
 %:
 	dh $@
 
 override_dh_auto_build:
 	docbook-to-man debian/connect-proxy.sgml > debian/connect-proxy.1
-	cat connect.c | sed 's/SOCKLEN_T/socklen_t/' > connect_patched.c
 	[ -d usr/bin ] || mkdir -p usr/bin
-	gcc -o usr/bin/connect-proxy connect_patched.c
+	$(CC) -DSOCKLEN_T=socklen_t connect.c -o usr/bin/connect-proxy
 
 override_dh_clean:
 	rm -rf usr
-	rm -f connect_patched.c
 	dh_clean
