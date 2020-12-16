@@ -3,6 +3,7 @@ connect-proxy (1.105-1.1) UNRELEASED; urgency=medium
   * Non-maintainer upload.
   * debian/control:
     - Create git repo on salsa, and add Vcs-* URL.
+    - Add Rules-Requires-Root: no
 
  -- Roger Shimizu <rosh@debian.org>  Thu, 17 Dec 2020 00:57:52 +0900
 
