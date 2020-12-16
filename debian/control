@@ -6,6 +6,8 @@ Uploaders: Christian Bayle <bayle@debian.org>
 Build-Depends: debhelper (>=9), docbook-to-man
 Standards-Version: 3.9.6
 Homepage: http://bitbucket.org/gotoh/connect/
+Vcs-Browser: https://salsa.debian.org/debian/connect-proxy
+Vcs-Git: https://salsa.debian.org/debian/connect-proxy.git
 
 Package: connect-proxy
 Architecture: any
@@ -14,4 +16,3 @@ Description: Establish TCP connection using SOCKS4/5 or HTTP tunnel
  connect-proxy is a simple relaying command to make tunnel TCP connection
  via SOCKS or HTTPS proxies.
  It is mainly intended to be used as proxy command of OpenSSH.
-
