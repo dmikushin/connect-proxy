@@ -1,4 +1,4 @@
-connect-proxy (1.105-1.1) UNRELEASED; urgency=medium
+connect-proxy (1.105-1.1) unstable; urgency=medium
 
   * Non-maintainer upload.
 
@@ -17,7 +17,7 @@ connect-proxy (1.105-1.1) UNRELEASED; urgency=medium
     + Let dpkg's buildtools.mk set up $(CC).
     + Don't hard code gcc.
 
- -- Roger Shimizu <rosh@debian.org>  Thu, 17 Dec 2020 00:57:52 +0900
+ -- Roger Shimizu <rosh@debian.org>  Thu, 17 Dec 2020 02:19:57 +0900
 
 connect-proxy (1.105-1) unstable; urgency=medium
 
