@@ -1,7 +1,7 @@
 /***********************************************************************
  * connect.c -- Make socket connection using SOCKS4/5 and HTTP tunnel.
  *
- * Copyright (c) 2000-2006 Shun-ichi Goto
+ * Copyright (c) 2000-2006, 2012 Shun-ichi Goto
  * Copyright (c) 2002, J. Grant (English Corrections)
  *
  * This program is free software; you can redistribute it and/or
@@ -46,12 +46,12 @@
  *  On SOLARIS:
  *      $ gcc -o connect -lresolv -lsocket -lnsl connect.c
  *
- *  on Win32 environment:
- *      $ cl connect.c wsock32.lib advapi32.lib
+ *  on Win32 environment, platform SDK (for iphlpapi.lib) is required:
+ *      $ cl connect.c advapi32.lib iphlpapi.lib ws2_32.lib
  *    or
- *      $ bcc32 connect.c wsock32.lib advapi32.lib
- *    or
- *      $ gcc connect.c -o connect
+ *      $ bcc32 connect.c advapi32.lib iphlpapi.lib ws2_32.lib
+ *    or for mingw32
+ *      $ gcc connect.c -o connect -lwsock32 -liphlpapi
  *
  *  on Mac OS X environment:
  *      $ gcc connect.c -o connect -lresolv
@@ -170,7 +170,7 @@
  *
  * ssh-askpass support
  * ===================
-  *
+ *
  *   You can use ssh-askpass (came from OpenSSH or else) to specify
  *   password on graphical environment (X-Window or MS Windows). To use
  *   this, set program name to environment variable SSH_ASKPASS. On UNIX,
@@ -199,6 +199,15 @@
  *  HTTP Authentication: Basic and Digest Access Authentication -- RFC 2617
  *             For proxy authentication, refer these documents.
  *
+ * History
+ * =======
+ *
+ *   2012-04-21: Add feature to make direct connection when remote target
+ *               host is in local network. For this featurer, enumerates
+ *               network interface addresses and add them to direct
+ *               address table automatically. Currently, this feature is
+ *               available on win32 platform only and needs to link with
+ *               iphlpapi.lib.
  ***********************************************************************/
 
 #include <stdio.h>
@@ -220,6 +229,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <winsock.h>
+#include <iphlpapi.h>
 #include <sys/stat.h>
 #include <io.h>
 #include <conio.h>
@@ -235,7 +245,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-#if !defined(_WIN32) && !defined(__CYGWIN32__)
+#if !defined(_WIN32) && !defined(__CYGWIN32__) && !defined(__INTERIX)
 #define WITH_RESOLVER 1
 #include <arpa/nameser.h>
 #include <resolv.h>
@@ -244,8 +254,15 @@
 #endif /* not ( not _WIN32 && not __CYGWIN32__) */
 #endif /* !_WIN32 */
 
+/* Older Solaris doesn't define INADDR_NONE so we may need to */
+#ifndef INADDR_NONE
+#define INADDR_NONE ((unsigned long) -1)
+#endif
+
 #ifdef _WIN32
+#ifndef ECONNRESET
 #define ECONNRESET WSAECONNRESET
+#endif	/* not ECONNRESET */
 #endif /* _WI32 */
 
 
@@ -285,7 +302,7 @@ static char *usage = "usage: %s [-dnhst45] [-p local-port]"
 /* name of this program */
 char *progname = NULL;
 char *progdesc = "connect --- simple relaying command via proxy.";
-char *version = "1.101";
+char *version = "1.105";
 
 /* set of character for strspn() */
 const char *digits    = "0123456789";
@@ -460,17 +477,18 @@ int proxy_auth_type = PROXY_AUTH_NONE;
 
 #ifdef _WIN32
 #define popen _popen
+#define pclose _pclose
 #endif /* WIN32 */
 
 /* packet operation macro */
-#define PUT_BYTE(ptr,data) (*(unsigned char*)ptr = data)
+#define PUT_BYTE(ptr,data) (*(unsigned char *)(ptr) = (unsigned char)(data))
 
 /* debug message output */
 void
 debug( const char *fmt, ... )
 {
-    va_list args;
     if ( f_debug ) {
+	va_list args;
         va_start( args, fmt );
         fprintf(stderr, "DEBUG: ");
         vfprintf( stderr, fmt, args );
@@ -481,9 +499,9 @@ debug( const char *fmt, ... )
 void
 debug_( const char *fmt, ... )                  /* without prefix */
 {
-    va_list args;
     if ( f_debug ) {
-        va_start( args, fmt );
+	va_list args;
+	va_start( args, fmt );
         vfprintf( stderr, fmt, args );
         va_end( args );
     }
@@ -537,7 +555,7 @@ char *
 expand_host_and_port (const char *fmt, const char *host, int port)
 {
     const char *src;
-    char *buf, *dst, *ptr;
+    char *buf, *dst;
     size_t len = strlen(fmt) + strlen(host) + 20;
     buf = xmalloc (len);
     dst = buf;
@@ -696,10 +714,10 @@ void
 read_parameter_file_1(const char* name)
 {
     FILE* f;
-    int line;
     char lbuf[1025];
     f = fopen(name, "r");
     if( f ){
+        int line;
         debug("Reading parameter file(%s)\n", name);
         for ( line = 1; fgets(lbuf, 1024, f); line++ ) {
             char *p, *q, *param, *value;
@@ -740,6 +758,7 @@ read_parameter_file_1(const char* name)
                 debug("Parameter `%s' is set to `%s'\n", param, value);
             }
         }
+        fclose(f);
     }
 }
 
@@ -859,7 +878,7 @@ parse_addr_pair (const char *str, struct in_addr *addr, struct in_addr *mask)
     */
     const char *ptr;
     u_char *dsta, *dstm;
-    int i, n;
+    int i;
 
     assert( str != NULL );
     addr->s_addr = 0;
@@ -907,6 +926,7 @@ parse_addr_pair (const char *str, struct in_addr *addr, struct in_addr *mask)
         /* complete as format #1 */
     } else {
         /* case of format #2 */
+        int n;
         if ( !isdigit(*ptr) )
             return -1;                  /* format error: */
         n = atoi(ptr);
@@ -917,6 +937,41 @@ parse_addr_pair (const char *str, struct in_addr *addr, struct in_addr *mask)
     }
     return 0;
 }
+
+#ifdef _WIN32
+/* updates direct table with local net addr/mask informations
+   NOTE: needs platform SDK for compile and link with iphlpapi.lib. */
+void
+make_localnet_as_direct (void)
+{
+    DWORD i;
+    PMIB_IPADDRTABLE table;
+    DWORD size = 0;
+    DWORD ret = 0;
+    /* allocate table */
+    if (GetIpAddrTable(NULL, &size, 0) == ERROR_INSUFFICIENT_BUFFER) {
+	table = (MIB_IPADDRTABLE *) xmalloc (size);
+    } else {
+	error("unexpected GetIpAddrTable() behaviour, errno=%d\n", 
+	      WSAGetLastError());
+	return; /* give up getting local addresses */
+    }
+    /* get information */
+    ret = GetIpAddrTable(table, &size, 0);
+    if (ret != NO_ERROR) {
+	error("GetIpAddrTable() failed, errno=%d\n", WSAGetLastError());
+	return;
+    }
+    /* add local addr/mask to the table */
+    debug("making direct addr list from network adapter address:\n");
+    for (i=0; i<table->dwNumEntries; i++) {
+	add_direct_addr((struct in_addr *)&table->table[i].dwAddr,
+			(struct in_addr *)&table->table[i].dwMask, 0);
+    }
+    free(table);
+}
+#endif
+
 
 void
 initialize_direct_addr (void)
@@ -1020,6 +1075,7 @@ is_direct_address (const struct in_addr addr)
     ends_with("foo.beebar.com", "bar.com") => 0 (partial match)
     ends_with("bar", "bar.com")            => 0 (shorter)
  */
+int
 domain_match(const char *s1, const char *s2)
 {
     int len1, len2;
@@ -1053,17 +1109,14 @@ int
 is_direct_name (const char *name)
 {
     int len, i;
-    const char *tail;
     debug("checking %s is for direct?\n", name);
     name = downcase(strdup(name));
     len = strlen(name);
     if (len < 1)
         return 0;                               /* false */
-    tail = &name[len];
     for (i=0; i<n_direct_addr_list; i++ ) {
-        int dlen, neg;
+        int neg;
         const char *dname;
-        const char *n, *d;
         dname = direct_addr_list[i].name;
         if (dname == NULL)
             continue;                           /* it's addr/mask entry */
@@ -1111,7 +1164,7 @@ int intr_flag = 0;
 
 #ifndef _WIN32
 void
-intr_handler(int sig)
+intr_handler(int sig __attribute__((unused)))
 {
     intr_flag = 1;
 }
@@ -1170,8 +1223,10 @@ tty_readpass( const char *prompt, char *buf, size_t size )
         error("Unable to open %s\n", TTY_NAME);
         return -1;                              /* can't open tty */
     }
-    if ( size <= 0 )
+    if ( size == 0 ) {
+        close(tty);
         return -1;                              /* no room */
+    }
     write(tty, prompt, strlen(prompt));
     buf[0] = '\0';
     tty_change_echo(tty, 0);                    /* disable echo */
@@ -1329,7 +1384,7 @@ determine_relay_password ()
 int
 set_relay( int method, char *spec )
 {
-    char *buf, *sep, *resolve;
+    char *buf, *sep;
 
     relay_method = method;
 
@@ -1365,6 +1420,7 @@ set_relay( int method, char *spec )
 
         /* determine resolve method */
         if ( socks_resolve == RESOLVE_UNKNOWN ) {
+	    char *resolve;
             if ( ((socks_version == 5) &&
                   ((resolve = getparam(ENV_SOCKS5_RESOLVE)) != NULL)) ||
                  ((socks_version == 4) &&
@@ -1410,7 +1466,7 @@ set_relay( int method, char *spec )
     spec = buf;
 
     /* check username in spec */
-    sep = strchr( spec, '@' );
+    sep = strrchr( spec, '@' );
     if ( sep != NULL ) {
         *sep = '\0';
         relay_user = strdup( spec );
@@ -1604,6 +1660,11 @@ getarg( int argc, char **argv )
     if ( 0 < err )
         goto quit;
 
+#ifdef _WIN32
+    /* add local addr/mask to direct table automaticaly */
+    make_localnet_as_direct();
+#endif
+    
     set_relay( method, server );
 
     /* check destination HOST (MUST) */
@@ -1612,7 +1673,7 @@ getarg( int argc, char **argv )
         fprintf(stderr, usage, progname);
         exit(0);
     }
-    dest_host = argv[0];
+    dest_host = strdup(argv[0]);
     /* decide port or service name from programname or argument */
     if ( ((ptr=strrchr( progname, '/' )) != NULL) ||
          ((ptr=strchr( progname, '\\')) != NULL) )
@@ -1699,13 +1760,13 @@ set_timeout(int timeout)
         alarm( 0 );
     } else {
         debug( "setting timeout: %d seconds\n", timeout );
-        signal(SIGALRM, (void *)sig_timeout);
+        signal(SIGALRM, (__sighandler_t)sig_timeout);
         alarm( timeout );
     }
 }
 #endif
 
-#if !defined(_WIN32) && !defined(__CYGWIN32__)
+#if !defined(_WIN32) && !defined(__CYGWIN32__) && !defined(__INTERIX)
 void
 switch_ns (struct sockaddr_in *ns)
 {
@@ -1714,7 +1775,7 @@ switch_ns (struct sockaddr_in *ns)
     _res.nscount = 1;
     debug("Using nameserver at %s\n", inet_ntoa(ns->sin_addr));
 }
-#endif /* !_WIN32 && !__CYGWIN32__ */
+#endif /* !_WIN32 && !__CYGWIN32__ && !__INTERIX */
 
 /* TODO: IPv6
    TODO: fallback if askpass execution failed.
@@ -1808,7 +1869,7 @@ report_text( char *prefix, char *buf )
 
 
 void
-report_bytes( char *prefix, char *buf, int len )
+report_bytes( const char *prefix, const char *buf, int len )
 {
     if ( ! f_debug )
         return;
@@ -1823,16 +1884,16 @@ report_bytes( char *prefix, char *buf, int len )
 }
 
 int
-atomic_out( SOCKET s, char *buf, int size )
+atomic_out( SOCKET s, const char *buf, int size )
 {
-    int ret, len;
+    int ret;
 
     assert( buf != NULL );
     assert( 0<=size );
     /* do atomic out */
     ret = 0;
     while ( 0 < size ) {
-        len = send( s, buf+ret, size, 0 );
+        int len = send( s, buf+ret, size, 0 );
         if ( len == -1 )
             fatal("atomic_out() failed to send(), %d\n", socket_errno());
         ret += len;
@@ -1851,7 +1912,7 @@ atomic_out( SOCKET s, char *buf, int size )
 int
 atomic_in( SOCKET s, char *buf, int size )
 {
-    int ret, len;
+    int ret;
 
     assert( buf != NULL );
     assert( 0<=size );
@@ -1859,7 +1920,7 @@ atomic_in( SOCKET s, char *buf, int size )
     /* do atomic in */
     ret = 0;
     while ( 0 < size ) {
-        len = recv( s, buf+ret, size, 0 );
+        int len = recv( s, buf+ret, size, 0 );
         if ( len == -1 ) {
             fatal("atomic_in() failed to recv(), %d\n", socket_errno());
         } else if ( len == 0 ) {
@@ -1985,9 +2046,11 @@ readpass( const char* prompt, ...)
         if ( fp == NULL )
             return NULL;                        /* fail */
         buf[0] = '\0';
-        if (fgets(buf, sizeof(buf), fp) == NULL)
+        if (fgets(buf, sizeof(buf), fp) == NULL) {
+            pclose(fp);
             return NULL;                        /* fail */
-        fclose(fp);
+        }
+        pclose(fp);
     } else {
         tty_readpass( buf, buf, sizeof(buf));
     }
@@ -1998,7 +2061,7 @@ readpass( const char* prompt, ...)
 static int
 socks5_do_auth_userpass( int s )
 {
-    unsigned char buf[1024], *ptr;
+    char buf[1024], *ptr;
     char *pass = NULL;
     int len;
 
@@ -2118,9 +2181,10 @@ socks5_auth_parse(char *start, unsigned char *auth_list, int max_auth){
 int
 begin_socks5_relay( SOCKET s )
 {
-    unsigned char buf[256], *ptr, *env = socks5_auth;
-    unsigned char n_auth = 0; unsigned char auth_list[10], auth_method;
-    int len, auth_result, i;
+    char buf[256], *ptr, *env = socks5_auth;
+    int n_auth = 0;
+    unsigned char auth_list[10], auth_method;
+    int auth_result, i;
 
     debug( "begin_socks_relay()\n");
 
@@ -2147,7 +2211,7 @@ begin_socks5_relay( SOCKET s )
     atomic_out( s, buf, ptr-buf );              /* send requst */
     atomic_in( s, buf, 2 );                     /* recv response */
     if ( (buf[0] != 5) ||                       /* ver5 response */
-         (buf[1] == 0xFF) ) {                   /* check auth method */
+         ((unsigned char)buf[1] == 0xFF) ) {	/* check auth method */
         error("No auth method accepted.\n");
         return -1;
     }
@@ -2185,6 +2249,7 @@ begin_socks5_relay( SOCKET s )
     PUT_BYTE( ptr++, 0);                        /* FLG: 0 */
     if ( dest_addr.sin_addr.s_addr == 0 ) {
         /* resolved by SOCKS server */
+	int len;
         PUT_BYTE( ptr++, 3);                    /* ATYP: DOMAINNAME */
         len = strlen(dest_host);
         PUT_BYTE( ptr++, len);                  /* DST.ADDR (len) */
@@ -2253,7 +2318,7 @@ begin_socks5_relay( SOCKET s )
 int
 begin_socks4_relay( SOCKET s )
 {
-    unsigned char buf[256], *ptr;
+    char buf[256], *ptr;
 
     debug( "begin_socks_relay()\n");
 
@@ -2322,7 +2387,7 @@ char *
 make_base64_string(const char *str)
 {
     static char *buf;
-    unsigned char *src;
+    const char *src;
     char *dst;
     int bits, data, src_len, dst_len;
     /* make base64 string */
@@ -2330,8 +2395,8 @@ make_base64_string(const char *str)
     dst_len = (src_len+2)/3*4;
     buf = xmalloc(dst_len+1);
     bits = data = 0;
-    src = (unsigned char *)str;
-    dst = (unsigned char *)buf;
+    src = str;
+    dst = buf;
     while ( dst_len-- ) {
         if ( bits < 6 ) {
             data = (data << 8) | *src;
@@ -2464,7 +2529,8 @@ begin_http_relay( SOCKET s )
                 /* parse type and realm */
                 char *scheme, *realm;
                 scheme = cut_token(buf, " ");
-                realm = cut_token(scheme, " ");
+		if (scheme != NULL)
+		    realm = cut_token(scheme, " ");
                 if ( scheme == NULL || realm == NULL ) {
                     debug("Invalid format of %s field.", auth_what);
                     return START_ERROR;         /* fail */
@@ -2512,7 +2578,7 @@ begin_telnet_relay( SOCKET s )
     char *bad_phrase_list[] = {
 	" failed", " refused", " rejected", " closed"
     };
-    char sep = ' ';
+    char sep;
     int i;
 
     debug("begin_telnet_relay()\n");
@@ -2521,7 +2587,7 @@ begin_telnet_relay( SOCKET s )
     debug("good phrase: '%s'\n", good_phrase);
     debug("bad phrases");
     sep = ':';
-    for (i=0; i< (sizeof(bad_phrase_list) / sizeof(char*)); i++) {
+    for (i=0; i<(int)(sizeof(bad_phrase_list) / sizeof(char*)); i++) {
 	debug_("%c '%s'", sep, bad_phrase_list[i]);
 	sep = ',';
     }
@@ -2551,7 +2617,7 @@ begin_telnet_relay( SOCKET s )
             return START_OK;
         }
 	/* then, check bad phrase */
-	for (i=0; i<(sizeof(bad_phrase_list)/sizeof(char*)); i++) {
+	for (i=0; i<(int)(sizeof(bad_phrase_list)/sizeof(char*)); i++) {
 	    if (strstr(buf, bad_phrase_list[i]) != NULL) {
 		debug("bad phrase is detected: '%s'\n", bad_phrase_list[i]);
 		return START_ERROR;
@@ -2615,7 +2681,6 @@ do_repeater( SOCKET local_in, SOCKET local_out, SOCKET remote )
     /** other variables **/
     int nfds, len;
     fd_set ifds, ofds;
-    struct timeval *tmo;
 #ifdef _WIN32
     struct timeval win32_tmo;
 #endif /* _WIN32 */
@@ -2628,6 +2693,7 @@ do_repeater( SOCKET local_in, SOCKET local_out, SOCKET remote )
     rbuf_len = 0;
 
     while ( f_local || f_remote ) {
+	struct timeval *tmo;
         FD_ZERO(&ifds );
         FD_ZERO(&ofds );
         tmo = NULL;
@@ -2766,7 +2832,7 @@ accept_connection (u_short port)
     int connection;
     struct sockaddr_in name;
     struct sockaddr client;
-    int socklen;
+    SOCKLEN_T socklen;
     fd_set ifds;
     int nfds;
     int sockopt;
@@ -2874,6 +2940,16 @@ retry:
         set_timeout (connect_timeout);
 #endif /* not _WIN32 */
 
+    /* resolve host name localy to determine direct or not if allowed */
+    if (relay_method == METHOD_SOCKS &&
+        socks_resolve == RESOLVE_LOCAL &&
+	local_resolve (dest_host, &dest_addr) == 0) {
+	/* resolved, replace dest_host
+	   if failed, simply ignore here */
+	free(dest_host);
+	dest_host = strdup(inet_ntoa(dest_addr.sin_addr));
+    }
+	
     if (check_direct(dest_host))
         relay_method = METHOD_DIRECT;
     /* make connection */
@@ -2890,15 +2966,10 @@ retry:
     }
 
     /** resolve destination host (SOCKS) **/
-#if !defined(_WIN32) && !defined(__CYGWIN32__)
+#if !defined(_WIN32) && !defined(__CYGWIN32__) && !defined(__INTERIX)
     if (socks_ns.sin_addr.s_addr != 0)
         switch_ns (&socks_ns);
-#endif /* not _WIN32 && not __CYGWIN32__ */
-    if (relay_method == METHOD_SOCKS &&
-        socks_resolve == RESOLVE_LOCAL &&
-        local_resolve (dest_host, &dest_addr) < 0) {
-        fatal("Unknown host: %s", dest_host);
-    }
+#endif /* not _WIN32 && not __CYGWIN32__ && !defined(__INTERIX) */
 
     /** relay negociation **/
     switch ( relay_method ) {
@@ -2912,13 +2983,13 @@ retry:
         ret = begin_http_relay(remote);
         switch (ret) {
         case START_ERROR:
-            close (remote);
+            closesocket (remote);
             fatal("failed to begin relaying via HTTP.\n");
         case START_OK:
             break;
         case START_RETRY:
             /* retry with authentication */
-            close (remote);
+            closesocket (remote);
             goto retry;
         }
         break;
