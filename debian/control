@@ -1,7 +1,8 @@
 Source: connect-proxy
 Section: net
 Priority: optional
-Maintainer: Christian Bayle <bayle@debian.org>
+Maintainer: Philippe Coval <rzr@users.sf.net>
+Uploaders: Christian Bayle <bayle@debian.org>
 Build-Depends:
  debhelper-compat (= 12),
  docbook-to-man
