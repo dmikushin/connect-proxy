@@ -4,7 +4,7 @@ Priority: optional
 Maintainer: Philippe Coval <rzr@users.sf.net>
 Uploaders: Christian Bayle <bayle@debian.org>
 Build-Depends:
- debhelper-compat (= 12),
+ debhelper-compat (= 13),
  docbook-to-man
 Standards-Version: 3.9.6
 Rules-Requires-Root: no
