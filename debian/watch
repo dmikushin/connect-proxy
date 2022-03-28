@@ -1,3 +1,0 @@
-version=3
-
-https://bitbucket.org/gotoh/connect/downloads?tab=tags .*/(\d.*)\.tar\.gz
