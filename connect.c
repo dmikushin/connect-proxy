@@ -1,5 +1,5 @@
 /***********************************************************************
- * connect.c -- Make socket connection using SOCKS4/5 and HTTP tunnel.
+ * connect.c -- Make socket connection using SOCKS5 tunnel.
  *
  * Copyright (c) 2000-2006, 2012 Shun-ichi Goto
  * Copyright (c) 2002, J. Grant (English Corrections)
@@ -24,47 +24,13 @@
  * CREATE:   Wed Jun 21, 2000
  * ---------------------------------------------------------
  *
- * Getting Source
- * ==============
- *
- *   Recent version of 'connect.c' is available from
- *     http://www.taiyo.co.jp/~gotoh/ssh/connect.c
- *
- *   Related tool, ssh-askpass.exe (alternative ssh-askpass on UNIX)
- *   is available:
- *     http://www.taiyo.co.jp/~gotoh/ssh/ssh-askpass.exe.gz
- *
- *   See more detail:
- *     http://www.taiyo.co.jp/~gotoh/ssh/connect.html
- *
- * How To Compile
- * ==============
- *
- *  On UNIX environment:
- *      $ gcc connect.c -o connect
- *
- *  On SOLARIS:
- *      $ gcc -o connect -lresolv -lsocket -lnsl connect.c
- *
- *  on Win32 environment, platform SDK (for iphlpapi.lib) is required:
- *      $ cl connect.c advapi32.lib iphlpapi.lib ws2_32.lib
- *    or
- *      $ bcc32 connect.c advapi32.lib iphlpapi.lib ws2_32.lib
- *    or for mingw32
- *      $ gcc connect.c -o connect -lwsock32 -liphlpapi
- *
- *  on Mac OS X environment:
- *      $ gcc connect.c -o connect -lresolv
- *    or
- *      $ gcc connect.c -o connect -DBIND_8_COMPAT=1
- *
  * How To Use
  * ==========
  *
  *   You can specify proxy method in an environment variable or in a
  *   command line option.
  *
- *   usage:  connect [-dnhst45] [-R resolve] [-p local-port] [-w sec]
+ *   usage:  connect [-dnhst] [-R resolve] [-p local-port] [-w sec]
  *                   [-H [user@]proxy-server[:port]]
  *                   [-S [user@]socks-server[:port]]
  *                   [-T proxy-server[:port]]
@@ -92,9 +58,7 @@
  *   hostname. Three keywords ("local", "remote", "both") or dot-notation
  *   IP address are acceptable.  The keyword "both" means, "Try local
  *   first, then remote". If a dot-notation IP address is specified, use
- *   this host as nameserver. The default is "remote" for SOCKS5 or
- *   "local" for others. On SOCKS4 protocol, remote resolving method
- *   ("remote" and "both") requires protocol 4a supported server.
+ *   this host as nameserver. The default is "remote" for SOCKS5.
  *
  *   The '-p' option will forward a local TCP port instead of using the
  *   standard input and output.
@@ -183,31 +147,13 @@
  *   SOCKS5 -- RFC 1928, RFC 1929, RFC 1961
  *             NEC SOCKS Reference Implementation is available from:
  *               http://www.socks.nec.com
- *             DeleGate version 5 or earlier can be SOCKS4 server,
- *             and version 6 can be SOCKS5 and SOCKS4 server.
- *             and version 7.7.0 or later can be SOCKS5 and SOCKS4a server.
+ *             DeleGate version 6 or later is required for SOCKS5 server.
  *               http://www.delegate.org/delegate/
- *
- *   HTTP-Proxy --
- *             Many http proxy servers supports this, but https should
- *             be allowed as configuration on your host.
- *             For example on DeleGate, you should add "https" to the
- *             "REMITTABLE" parameter to allow HTTP-Proxy like this:
- *               delegated -Pxxxx ...... REMITTABLE="+,https" ...
  *
  *  Hypertext Transfer Protocol -- HTTP/1.1  -- RFC 2616
  *  HTTP Authentication: Basic and Digest Access Authentication -- RFC 2617
  *             For proxy authentication, refer these documents.
  *
- * History
- * =======
- *
- *   2012-04-21: Add feature to make direct connection when remote target
- *               host is in local network. For this featurer, enumerates
- *               network interface addresses and add them to direct
- *               address table automatically. Currently, this feature is
- *               available on win32 platform only and needs to link with
- *               iphlpapi.lib.
  ***********************************************************************/
 
 #include <stdio.h>
@@ -283,7 +229,7 @@
    Win32 environment does not support -R option (vc and cygwin)
    Win32 native compilers does not support -w option, yet (vc)
 */
-static char *usage = "usage: %s [-dnhst45] [-p local-port]"
+static char *usage = "usage: %s [-dnhst] [-p local-port]"
 #ifdef _WIN32
 #ifdef __CYGWIN32__
 "[-w timeout] \n"                               /* cygwin cannot -R */
@@ -404,7 +350,6 @@ LOOKUP_ITEM socks4_rep_names[] = {
 #define RESOLVE_BOTH    3
 char *resolve_names[] = { "UNKNOWN", "LOCAL", "REMOTE", "BOTH" };
 
-int socks_version = 5;                          /* SOCKS protocol version */
 int socks_resolve = RESOLVE_UNKNOWN;
 struct sockaddr_in socks_ns;
 char *socks5_auth = NULL;
@@ -982,19 +927,11 @@ initialize_direct_addr (void)
     struct in_addr addr, mask;
 
     if ( relay_method == METHOD_SOCKS ){
-        if ( socks_version == 5 )
-            envkey = ENV_SOCKS5_DIRECT;
-        else
-            envkey = ENV_SOCKS4_DIRECT;
+        envkey = ENV_SOCKS5_DIRECT;
         env = getparam(envkey);
         if ( env == NULL )
             env = getparam(ENV_SOCKS_DIRECT);
-    } else if ( relay_method == METHOD_HTTP ){
-        env = getparam(ENV_HTTP_DIRECT);
     }
-
-    if ( env == NULL )
-        env = getparam(ENV_CONNECT_DIRECT);
 
     if ( env == NULL )
         return;                 /* no entry */
@@ -1299,14 +1236,14 @@ w32_tty_readpass( const char *prompt, char *buf, size_t size )
 
      Table.1 Order of environment variables for username
 
-        |  SOCKS v5   |  SOCKS v4   |   HTTP proxy    |
-      --+-------------+-------------+-----------------+
-      1 | SOCKS45_USER | SOCKS4_USER | HTTP_PROXY_USER |
-      --+-------------+-------------+                 |
-      2 |        SOCKS_USER         |                 |
-      --+---------------------------+-----------------+
-      3 |              CONNECT_USER                   |
-      --+---------------------------------------------+
+        |   SOCKS v5   |
+      --+--------------+
+      1 |  SOCKS5_USER |
+      --+--------------+
+      2 |  SOCKS_USER  |
+      --+--------------+
+      3 | CONNECT_USER |
+      --+--------------+
 
    Password is taken from
      1) by environment variables (see table.2)
@@ -1314,14 +1251,14 @@ w32_tty_readpass( const char *prompt, char *buf, size_t size )
 
      Table.2 Order of environment variables for password
 
-        |    SOCKS v5     |     HTTP proxy      |
-      --+-----------------+---------------------+
-      1 | SOCKS5_PASSWD   |                     |
-      --+-----------------+ HTTP_PROXY_PASSWORD |
-      2 | SOCKS5_PASSWORD |                     |
-      --+-----------------+---------------------+
-      3 |           CONNECT_PASSWORD            |
-      --+---------------------------------------+
+        |     SOCKS v5     |
+      --+------------------+
+      1 |  SOCKS5_PASSWD   |
+      --+------------------+
+      2 | SOCKS5_PASSWORD  |
+      --+------------------+
+      3 | CONNECT_PASSWORD |
+      --+------------------+
 
       Note: SOCKS5_PASSWD which is added in rev. 1.79
             to share value with NEC SOCKS implementation.
@@ -1333,15 +1270,7 @@ determine_relay_user ()
     char *user = NULL;
     /* get username from environment variable, or system. */
     if (relay_method == METHOD_SOCKS) {
-        if (user == NULL && socks_version == 5)
-            user = getparam (ENV_SOCKS5_USER);
-        if (user == NULL && socks_version == 4)
-            user = getparam (ENV_SOCKS4_USER);
-        if (user == NULL)
-            user = getparam (ENV_SOCKS_USER);
-    } else if (relay_method == METHOD_HTTP) {
-        if (user == NULL)
-            user = getparam (ENV_HTTP_PROXY_USER);
+        user = getparam (ENV_SOCKS5_USER);
     }
     if (user == NULL)
         user = getparam (ENV_CONNECT_USER);
@@ -1355,14 +1284,8 @@ char *
 determine_relay_password ()
 {
     char *pass = NULL;
-    if (pass == NULL && relay_method == METHOD_HTTP)
-        pass = getparam(ENV_HTTP_PROXY_PASSWORD);
-    if (pass == NULL && relay_method == METHOD_SOCKS)
-        pass = getparam(ENV_SOCKS5_PASSWD);
     if (pass == NULL && relay_method == METHOD_SOCKS)
         pass = getparam(ENV_SOCKS5_PASSWORD);
-    if (pass == NULL)
-        pass = getparam(ENV_CONNECT_PASSWORD);
     return pass;
 }
 
@@ -1402,14 +1325,7 @@ set_relay( int method, char *spec )
 
     case METHOD_SOCKS:
         if ( spec == NULL ) {
-            switch ( socks_version ) {
-            case 5:
-                spec = getparam(ENV_SOCKS5_SERVER);
-                break;
-            case 4:
-                spec = getparam(ENV_SOCKS4_SERVER);
-                break;
-            }
+            spec = getparam(ENV_SOCKS5_SERVER);
         }
         if ( spec == NULL )
             spec = getparam(ENV_SOCKS_SERVER);
@@ -1421,20 +1337,14 @@ set_relay( int method, char *spec )
         /* determine resolve method */
         if ( socks_resolve == RESOLVE_UNKNOWN ) {
 	    char *resolve;
-            if ( ((socks_version == 5) &&
-                  ((resolve = getparam(ENV_SOCKS5_RESOLVE)) != NULL)) ||
-                 ((socks_version == 4) &&
-                  ((resolve = getparam(ENV_SOCKS4_RESOLVE)) != NULL)) ||
+            if ( ((resolve = getparam(ENV_SOCKS5_RESOLVE)) != NULL) ||
                  ((resolve = getparam(ENV_SOCKS_RESOLVE)) != NULL) ) {
                 socks_resolve = lookup_resolve( resolve );
                 if ( socks_resolve == RESOLVE_UNKNOWN )
                     fatal("Invalid resolve method: %s\n", resolve);
             } else {
                 /* default */
-                if ( socks_version == 5 )
-                    socks_resolve = RESOLVE_REMOTE;
-                else
-                    socks_resolve = RESOLVE_LOCAL;
+                socks_resolve = RESOLVE_REMOTE;
             }
         }
         break;
@@ -1611,14 +1521,6 @@ getarg( int argc, char **argv )
                 break;
 #endif /* not _WIN32 */
 
-            case '4':
-                socks_version = 4;
-                break;
-
-            case '5':
-                socks_version = 5;
-                break;
-
             case 'a':
                 if ( 1 < argc ) {
                     argv++, argc--;
@@ -1716,7 +1618,6 @@ quit:
         debug("relay_user=%s\n", relay_user);
     }
     if ( relay_method == METHOD_SOCKS ) {
-        debug("socks_version=%d\n", socks_version);
         debug("socks_resolve=%s (%d)\n",
               resolve_names[socks_resolve], socks_resolve);
     }
@@ -2288,80 +2189,6 @@ begin_socks5_relay( SOCKET s )
     return 0;
 }
 
-/* begin SOCKS protocol 4 relaying
-   And no authentication is supported.
-
-   There's SOCKS protocol version 4 and 4a. Protocol version
-   4a has capability to resolve hostname by SOCKS server, so
-   we don't need resolving IP address of destination host on
-   local machine.
-
-   Environment variable SOCKS_RESOLVE directs how to resolve
-   IP addess. There's 3 keywords allowed; "local", "remote"
-   and "both" (case insensitive). Keyword "local" means taht
-   target host name is resolved by localhost resolver
-   (usualy with gethostbyname()), "remote" means by remote
-   SOCKS server, "both" means to try resolving by localhost
-   then remote.
-
-   SOCKS4 protocol and authentication of SOCKS5 protocol
-   requires user name on connect request.
-   User name is determined by following method.
-
-   1. If server spec has user@hostname:port format then
-      user part is used for this SOCKS server.
-
-   2. Get user name from environment variable LOGNAME, USER
-      (in this order).
-
-*/
-int
-begin_socks4_relay( SOCKET s )
-{
-    char buf[256], *ptr;
-
-    debug( "begin_socks_relay()\n");
-
-    /* make connect request packet
-       protocol v4:
-         VN:1, CD:1, PORT:2, ADDR:4, USER:n, NULL:1
-       protocol v4a:
-         VN:1, CD:1, PORT:2, DUMMY:4, USER:n, NULL:1, HOSTNAME:n, NULL:1
-    */
-    ptr = buf;
-    PUT_BYTE( ptr++, 4);                        /* protocol version (4) */
-    PUT_BYTE( ptr++, 1);                        /* CONNECT command */
-    PUT_BYTE( ptr++, dest_port>>8);     /* destination Port */
-    PUT_BYTE( ptr++, dest_port&0xFF);
-    /* destination IP */
-    memcpy(ptr, &dest_addr.sin_addr, sizeof(dest_addr.sin_addr));
-    ptr += sizeof(dest_addr.sin_addr);
-    if ( dest_addr.sin_addr.s_addr == 0 )
-        *(ptr-1) = 1;                           /* fake, protocol 4a */
-    /* username */
-    if (relay_user == NULL)
-        fatal( "Cannot determine user name.\n");
-    strcpy( ptr, relay_user );
-    ptr += strlen( relay_user ) +1;
-    /* destination host name (for protocol 4a) */
-    if ( (socks_version == 4) && (dest_addr.sin_addr.s_addr == 0)) {
-        strcpy( ptr, dest_host );
-        ptr += strlen( dest_host ) +1;
-    }
-    /* send command and get response
-       response is: VN:1, CD:1, PORT:2, ADDR:4 */
-    atomic_out( s, buf, ptr-buf);               /* send request */
-    atomic_in( s, buf, 8 );                     /* recv response */
-    if ( (buf[1] != SOCKS4_REP_SUCCEEDED) ) {   /* check reply code */
-        error("Got error response: %d: '%s'.\n",
-              buf[1], lookup(buf[1], socks4_rep_names));
-        return -1;                              /* failed */
-    }
-
-    /* Conguraturation, connected via SOCKS4 server! */
-    return 0;
-}
-
 int
 sendf(SOCKET s, const char *fmt,...)
 {
@@ -2418,7 +2245,6 @@ make_base64_string(const char *str)
     return buf;
 }
 
-
 int
 basic_auth (SOCKET s)
 {
@@ -2453,182 +2279,6 @@ basic_auth (SOCKET s)
 
     return ret;
 }
-
-/* begin relaying via HTTP proxy
-   Directs CONNECT method to proxy server to connect to
-   destination host (and port). It may not be allowed on your
-   proxy server.
- */
-int
-begin_http_relay( SOCKET s )
-{
-    char buf[1024];
-    int result;
-    char *auth_what;
-
-    debug("begin_http_relay()\n");
-
-    if (sendf(s,"CONNECT %s:%d HTTP/1.0\r\n", dest_host, dest_port) < 0)
-        return START_ERROR;
-    if (proxy_auth_type == PROXY_AUTH_BASIC && basic_auth (s) < 0)
-        return START_ERROR;
-    if (sendf(s,"\r\n") < 0)
-        return START_ERROR;
-
-    /* get response */
-    if ( line_input(s, buf, sizeof(buf)) < 0 ) {
-        debug("failed to read http response.\n");
-        return START_ERROR;
-    }
-
-    /* check status */
-    if (!strchr(buf, ' ')) {
-	error ("Unexpected http response: '%s'.\n", buf);
-	return START_ERROR;
-    }
-    result = atoi(strchr(buf,' '));
-
-    switch ( result ) {
-    case 200:
-        /* Conguraturation, connected via http proxy server! */
-        debug("connected, start user session.\n");
-        break;
-    case 302:                                   /* redirect */
-        do {
-            if (line_input(s, buf, sizeof(buf)))
-                break;
-            downcase(buf);
-            if (expect(buf, "Location: ")) {
-                relay_host = cut_token(buf, "//");
-                cut_token(buf, "/");
-                relay_port = atoi(cut_token(buf, ":"));
-            }
-        } while (strcmp(buf,"\r\n") != 0);
-        return START_RETRY;
-
-    /* We handle both 401 and 407 codes here: 401 is WWW-Authenticate, which
-     * not strictly the correct response, but some proxies do send this (e.g.
-     * Symantec's Raptor firewall) */
-    case 401:                                   /* WWW-Auth required */
-    case 407:                                   /* Proxy-Auth required */
-        /** NOTE: As easy implementation, we support only BASIC scheme
-            and ignore realm. */
-        /* If proxy_auth_type is PROXY_AUTH_BASIC and get
-         this result code, authentication was failed. */
-        if (proxy_auth_type != PROXY_AUTH_NONE) {
-            error("Authentication failed.\n");
-            return START_ERROR;
-        }
-        auth_what = (result == 401) ? "WWW-Authenticate:" : "Proxy-Authenticate:";
-        do {
-            if ( line_input(s, buf, sizeof(buf)) ) {
-                break;
-            }
-            downcase(buf);
-            if (expect(buf, auth_what)) {
-                /* parse type and realm */
-                char *scheme, *realm;
-                scheme = cut_token(buf, " ");
-		if (scheme != NULL)
-		    realm = cut_token(scheme, " ");
-                if ( scheme == NULL || realm == NULL ) {
-                    debug("Invalid format of %s field.", auth_what);
-                    return START_ERROR;         /* fail */
-                }
-                /* check supported auth type */
-                if (expect(scheme, "basic")) {
-                    proxy_auth_type = PROXY_AUTH_BASIC;
-                } else {
-                    debug("Unsupported authentication type: %s", scheme);
-                }
-            }
-        } while (strcmp(buf,"\r\n") != 0);
-        if ( proxy_auth_type == PROXY_AUTH_NONE ) {
-            debug("Can't find %s in response header.", auth_what);
-            return START_ERROR;
-        } else {
-            return START_RETRY;
-        }
-
-    default:
-        /* Not allowed */
-        debug("http proxy is not allowed.\n");
-        return START_ERROR;
-    }
-    /* skip to end of response header */
-    do {
-        if ( line_input(s, buf, sizeof(buf) ) ) {
-            debug("Can't skip response headers\n");
-            return START_ERROR;
-        }
-    } while ( strcmp(buf,"\r\n") != 0 );
-
-    return START_OK;
-}
-
-/* begin relaying via TELNET proxy.
-   Sends string specified by telnet_command (-c option) with
-   replacing host name and port number to the socket.  */
-int
-begin_telnet_relay( SOCKET s )
-{
-    char buf[1024];
-    char *cmd;
-    char *good_phrase = "connected to";
-    char *bad_phrase_list[] = {
-	" failed", " refused", " rejected", " closed"
-    };
-    char sep;
-    int i;
-
-    debug("begin_telnet_relay()\n");
-
-    /* report phrase */
-    debug("good phrase: '%s'\n", good_phrase);
-    debug("bad phrases");
-    sep = ':';
-    for (i=0; i<(int)(sizeof(bad_phrase_list) / sizeof(char*)); i++) {
-	debug_("%c '%s'", sep, bad_phrase_list[i]);
-	sep = ',';
-    }
-    debug_("\n");
-
-    /* make request string with replacing %h by destination hostname
-       and %p by port number, etc. */
-    cmd = expand_host_and_port(telnet_command, dest_host, dest_port);
-    
-    /* Sorry, we send request string now without waiting a prompt. */
-    if (sendf(s, "%s\r\n", cmd) < 0) {
-	free(cmd);
-        return START_ERROR;
-    }
-    free(cmd);
-
-    /* Process answer from proxy until good or bad phrase is detected.  We
-       assume that the good phrase should be appeared only in the final
-       line of proxy responses. Bad keywods in the line causes operation
-       fail. First checks a good phrase, then checks bad phrases.
-       If no match, continue reading line from proxy. */
-    while (!line_input(s, buf, sizeof(buf)) && buf[0] != '\0') {
-	downcase(buf);
-	/* first, check good phrase */
-        if (strstr(buf, good_phrase)) {
-	    debug("good phrase is detected: '%s'\n", good_phrase);
-            return START_OK;
-        }
-	/* then, check bad phrase */
-	for (i=0; i<(int)(sizeof(bad_phrase_list)/sizeof(char*)); i++) {
-	    if (strstr(buf, bad_phrase_list[i]) != NULL) {
-		debug("bad phrase is detected: '%s'\n", bad_phrase_list[i]);
-		return START_ERROR;
-	    }
-        }
-    }
-    debug("error reading from telnet proxy\n");
-
-    return START_ERROR;
-}
-
 
 #ifdef _WIN32
 /* ddatalen()
@@ -2974,28 +2624,8 @@ retry:
     /** relay negociation **/
     switch ( relay_method ) {
     case METHOD_SOCKS:
-        if ( ((socks_version == 5) && (begin_socks5_relay(remote) < 0)) ||
-             ((socks_version == 4) && (begin_socks4_relay(remote) < 0)) )
+        if (begin_socks5_relay(remote) < 0)
             fatal( "failed to begin relaying via SOCKS.\n");
-        break;
-
-    case METHOD_HTTP:
-        ret = begin_http_relay(remote);
-        switch (ret) {
-        case START_ERROR:
-            closesocket (remote);
-            fatal("failed to begin relaying via HTTP.\n");
-        case START_OK:
-            break;
-        case START_RETRY:
-            /* retry with authentication */
-            closesocket (remote);
-            goto retry;
-        }
-        break;
-    case METHOD_TELNET:
-        if (begin_telnet_relay(remote) < 0)
-             fatal("failed to begin relaying via telnet.\n");
         break;
     }
     debug("connected\n");
@@ -3030,13 +2660,3 @@ do_repeater:
     return 0;
 }
 
-/* ------------------------------------------------------------
-   Local Variables:
-   compile-command: "cc connect.c -o connect"
-   tab-width: 8
-   fill-column: 74
-   comment-column: 48
-   End:
-   ------------------------------------------------------------ */
-
-/*** end of connect.c ***/
