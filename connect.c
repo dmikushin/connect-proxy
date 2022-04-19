@@ -227,7 +227,11 @@ const char *digits    = "0123456789";
 const char *dotdigits = "0123456789.";
 
 /* options */
-int f_debug = 0;
+int f_debug = 1;
+
+const char* log_file_fmt = "/var/log/connect-socks5.%d";
+char log_file[128];
+FILE* log_file_fp = NULL;
 
 /* report flag to hide secure information */
 int f_report = 1;
@@ -329,7 +333,6 @@ char *socks5_auth = NULL;
 #define ENV_CONNECT_DIRECT "CONNECT_DIRECT"
 
 #define ENV_SOCKS5_AUTH "SOCKS5_AUTH"
-#define ENV_SSH_ASKPASS "SSH_ASKPASS"           /* askpass program */
 
 #define PROXY_AUTH_NONE 0
 #define PROXY_AUTH_BASIC 1
@@ -377,8 +380,8 @@ debug( const char *fmt, ... )
     if ( f_debug ) {
 	va_list args;
         va_start( args, fmt );
-        fprintf(stderr, "DEBUG: ");
-        vfprintf( stderr, fmt, args );
+        fprintf(log_file_fp, "DEBUG: ");
+        vfprintf( log_file_fp, fmt, args );
         va_end( args );
     }
 }
@@ -389,7 +392,7 @@ debug_( const char *fmt, ... )                  /* without prefix */
     if ( f_debug ) {
 	va_list args;
 	va_start( args, fmt );
-        vfprintf( stderr, fmt, args );
+        vfprintf( log_file_fp, fmt, args );
         va_end( args );
     }
 }
@@ -400,8 +403,9 @@ error( const char *fmt, ... )
 {
     va_list args;
     va_start( args, fmt );
-    fprintf(stderr, "ERROR: ");
-    vfprintf( stderr, fmt, args );
+    fprintf(log_file_fp, "ERROR: ");
+    vfprintf( log_file_fp, fmt, args );
+    fflush(log_file_fp);
     va_end( args );
 }
 
@@ -410,9 +414,10 @@ fatal( const char *fmt, ... )
 {
     va_list args;
     va_start( args, fmt );
-    fprintf(stderr, "FATAL: ");
-    vfprintf( stderr, fmt, args );
+    fprintf(log_file_fp, "FATAL: ");
+    vfprintf( log_file_fp, fmt, args );
     va_end( args );
+    fclose(log_file_fp);
     exit (EXIT_FAILURE);
 }
 
@@ -571,7 +576,6 @@ PARAMETER_ITEM parameter_table[] = {
     { ENV_SOCKS5_PASSWORD, NULL },
     { ENV_CONNECT_USER, NULL },
     { ENV_CONNECT_PASSWORD, NULL },
-    { ENV_SSH_ASKPASS, NULL },
     { ENV_SOCKS5_DIRECT, NULL },
     { ENV_SOCKS_DIRECT, NULL },
     { ENV_CONNECT_DIRECT, NULL },
@@ -1028,134 +1032,6 @@ check_direct(const char *host)
     debug("%s is for not direct.\n", host);
     return 0;                                    /* false */
 }
-
-
-/** TTY operation **/
-
-int intr_flag = 0;
-
-#ifndef _WIN32
-void
-intr_handler(int sig __attribute__((unused)))
-{
-    intr_flag = 1;
-}
-
-void
-tty_change_echo(int fd, int enable)
-{
-    static struct termios ntio, otio;           /* new/old termios */
-    static sigset_t nset, oset;                 /* new/old sigset */
-    static struct sigaction nsa, osa;           /* new/old sigaction */
-    static int disabled = 0;
-
-    if ( disabled && enable ) {
-        /* enable echo */
-        tcsetattr(fd, TCSANOW, &otio);
-        disabled = 0;
-        /* resotore sigaction */
-        sigprocmask(SIG_SETMASK, &oset, NULL);
-        sigaction(SIGINT, &osa, NULL);
-        if ( intr_flag != 0 ) {
-            /* re-generate signal  */
-            kill(getpid(), SIGINT);
-            sigemptyset(&nset);
-            sigsuspend(&nset);
-            intr_flag = 0;
-        }
-    } else if (!disabled && !enable) {
-        /* set SIGINTR handler and break syscall on singal */
-        sigemptyset(&nset);
-        sigaddset(&nset, SIGTSTP);
-        sigprocmask(SIG_BLOCK, &nset, &oset);
-        intr_flag = 0;
-        memset(&nsa, 0, sizeof(nsa));
-        nsa.sa_handler = intr_handler;
-        sigaction(SIGINT, &nsa, &osa);
-        /* disable echo */
-        if (tcgetattr(fd, &otio) == 0 && (otio.c_lflag & ECHO)) {
-            disabled = 1;
-            ntio = otio;
-            ntio.c_lflag &= ~(ECHO | ECHOE | ECHOK | ECHONL);
-            (void) tcsetattr(fd, TCSANOW, &ntio);
-        }
-    }
-
-    return;
-}
-
-#define TTY_NAME "/dev/tty"
-int
-tty_readpass( const char *prompt, char *buf, size_t size )
-{
-    int tty, ret = 0;
-
-    tty = open(TTY_NAME, O_RDWR);
-    if ( tty < 0 ) {
-        error("Unable to open %s\n", TTY_NAME);
-        return -1;                              /* can't open tty */
-    }
-    if ( size == 0 ) {
-        close(tty);
-        return -1;                              /* no room */
-    }
-    write(tty, prompt, strlen(prompt));
-    buf[0] = '\0';
-    tty_change_echo(tty, 0);                    /* disable echo */
-    ret = read(tty,buf, size-1);
-    tty_change_echo(tty, 1);                    /* restore */
-    write(tty, "\n", 1);                        /* new line */
-    close(tty);
-    if ( strchr(buf,'\n') == NULL  )
-        return -1;
-    if ( 0 < ret )
-        buf[ret] = '\0';
-    return ret;
-}
-
-#else  /* _WIN32 */
-
-BOOL __stdcall
-w32_intr_handler(DWORD dwCtrlType)
-{
-    if ( dwCtrlType == CTRL_C_EVENT ) {
-        intr_flag = 1;
-        return TRUE;
-    } else {
-        return FALSE;
-    }
-}
-
-#define tty_readpass w32_tty_readpass
-int
-w32_tty_readpass( const char *prompt, char *buf, size_t size )
-{
-    HANDLE in = CreateFile("CONIN$", GENERIC_READ|GENERIC_WRITE,
-                           0, NULL, OPEN_EXISTING, 0, NULL);
-    HANDLE out = CreateFile("CONOUT$", GENERIC_WRITE,
-                            0, NULL, OPEN_EXISTING, 0, NULL);
-    DWORD mode;
-    DWORD ret, bytes;
-
-    if (in == INVALID_HANDLE_VALUE || out == INVALID_HANDLE_VALUE)
-        fatal("Cannot open console. (errno=%d)", GetLastError());
-
-    WriteFile(out, prompt, strlen(prompt), &bytes, 0);
-    SetConsoleCtrlHandler(w32_intr_handler, TRUE ); /* add handler */
-    GetConsoleMode(in, &mode);
-    SetConsoleMode(in, mode&~ENABLE_ECHO_INPUT); /* disable echo */
-    ret = ReadFile(in, buf, size, &bytes, 0);
-    SetConsoleMode(in, mode);                   /* enable echo */
-    SetConsoleCtrlHandler( w32_intr_handler, FALSE ); /* remove handler */
-    if ( intr_flag )
-        GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0); /* re-signal */
-    WriteFile(out,"\n", 1, &bytes, 0);
-    CloseHandle(in);
-    CloseHandle(out);
-    return ret;
-}
-
-#endif /* _WIN32 */
 
 /*** User / Password ***/
 
@@ -1777,63 +1653,6 @@ lookup(int num, LOOKUP_ITEM *items)
     return "(unknown)";
 }
 
-/* readpass()
-   password input routine
-   Use ssh-askpass (same mechanism to OpenSSH)
-*/
-char *
-readpass( const char* prompt, ...)
-{
-    static char buf[1000];                      /* XXX, don't be fix length */
-    va_list args;
-    va_start(args, prompt);
-    vsnprintf(buf, sizeof(buf), prompt, args);
-    va_end(args);
-
-    if ( getparam(ENV_SSH_ASKPASS)
-#if !defined(_WIN32) && !defined(__CYGWIN32__)
-         && getenv("DISPLAY")
-#endif /* not _WIN32 && not __CYGWIN32__ */
-        ) {
-        /* use ssh-askpass to get password */
-        FILE *fp;
-        char *askpass = getparam(ENV_SSH_ASKPASS), *cmd;
-	int cmd_size = strlen(askpass) +1 +1 +strlen(buf) +1 +1;
-        cmd = xmalloc(cmd_size);
-#if defined(_WIN32) && !defined(__CYGWIN32__)
-	{
-	    /* Normalize path string of command ('/' => '\\').  This is
-	       required for the case of env value is for the cygwin ssh
-	       because cmd.exe treats '/' as option character.
-	       Note that this does not resolve mounts on cygwin.
-	    */
-	    char *p= askpass;
-	    while (*p) {
-		if (*p == '/')
-		    *p = '\\';
-		p++;
-	    }
-	}
-#endif	/* _WIN32 && not __CYGWIN32__ */
-        snprintf(cmd, cmd_size, "%s \"%s\"", askpass, buf);
-        debug("executing: %s", cmd);
-        fp = popen(cmd, "r");
-        free(cmd);
-        if ( fp == NULL )
-            return NULL;                        /* fail */
-        buf[0] = '\0';
-        if (fgets(buf, sizeof(buf), fp) == NULL) {
-            pclose(fp);
-            return NULL;                        /* fail */
-        }
-        pclose(fp);
-    } else {
-        tty_readpass( buf, buf, sizeof(buf));
-    }
-    buf[strcspn(buf, "\r\n")] = '\0';
-    return buf;
-}
-
 static int
 socks5_do_auth_userpass( int s )
 {
@@ -1849,9 +1668,7 @@ socks5_do_auth_userpass( int s )
         fatal("cannot determine user name.\n");
 
     /* get password from environment variable if exists. */
-    if ((pass=determine_relay_password()) == NULL &&
-        (pass=readpass("Enter SOCKS5 password for %s@%s: ",
-                       relay_user, relay_host)) == NULL)
+    if ((pass=determine_relay_password()) == NULL)
         fatal("Cannot get password for user: %s\n", relay_user);
 
     /* make authentication packet */
@@ -2350,6 +2167,13 @@ main( int argc, char **argv )
     WSADATA wsadata;
     WSAStartup( 0x101, &wsadata);
 #endif /* _WIN32 */
+
+    snprintf(log_file, 128, log_file_fmt, getpid());
+    log_file_fp = fopen(log_file, "w");
+    if (!log_file_fp) {
+        log_file_fp = stderr;
+        error("Failed to open the log file %s");
+    }
 
     /* initialization */
     getarg( argc, argv );
