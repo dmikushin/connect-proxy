@@ -31,28 +31,16 @@
  *   command line option.
  *
  *   usage:  connect [-dnhst] [-R resolve] [-p local-port] [-w sec]
- *                   [-H [user@]proxy-server[:port]]
  *                   [-S [user@]socks-server[:port]]
- *                   [-T proxy-server[:port]]
- *                   [-c telnet proxy command]
  *                   host port
  *
  *   "host" and "port" is for the target hostname and port-number to
  *   connect to.
  *
- *   The -H option specifys a hostname and port number of the http proxy
- *   server to relay. If port is omitted, 80 is used. You can specify this
- *   value in the environment variable HTTP_PROXY and pass the -h option
- *   to use it.
- *
  *   The -S option specifys the hostname and port number of the SOCKS
  *   server to relay.  Like -H, port number can be omitted and the default
  *   is 1080. You can also specify this value pair in the environment
  *   variable SOCKS5_SERVER and give the -s option to use it.
- *
- *   The '-4' and the '-5' options are for specifying SOCKS relaying and
- *   indicates protocol version to use. It is valid only when used with
- *   '-s' or '-S'. Default is '-5' (protocol version 5)
  *
  *   The '-R' option is for specifying method to resolve the
  *   hostname. Three keywords ("local", "remote", "both") or dot-notation
@@ -86,15 +74,6 @@
  *   or
  *     $ SOCKS5_SERVER=firewall; export SOCKS5_SERVER
  *     $ connect -s host 25
- *
- *   For a HTTP-PROXY connection:
- *     $ connect -H proxy-server:8080  host 25
- *   or
- *     $ HTTP_PROXY=proxy-server:8080; export HTTP_PROXY
- *     $ connect -h host 25
- *   To forward a local port, for example to use ssh:
- *     $ connect -p 5550 -H proxy-server:8080  host 22
- *    ($ ssh -l user -p 5550 localhost )
  *
  * TIPS
  * ====
@@ -130,7 +109,6 @@
  *
  *   Following environment variable is used for specifying user name.
  *     SOCKS: $SOCKS5_USER, $LOGNAME, $USER
- *     HTTP Proxy: $HTTP_PROXY_USER, $LOGNAME, $USER
  *
  * ssh-askpass support
  * ===================
@@ -149,10 +127,6 @@
  *               http://www.socks.nec.com
  *             DeleGate version 6 or later is required for SOCKS5 server.
  *               http://www.delegate.org/delegate/
- *
- *  Hypertext Transfer Protocol -- HTTP/1.1  -- RFC 2616
- *  HTTP Authentication: Basic and Digest Access Authentication -- RFC 2617
- *             For proxy authentication, refer these documents.
  *
  ***********************************************************************/
 
@@ -240,9 +214,7 @@ static char *usage = "usage: %s [-dnhst] [-p local-port]"
 /* help message for UNIX */
 "[-R resolve] [-w timeout] \n"
 #endif /* not _WIN32 */
-"          [-H proxy-server[:port]] [-S [user@]socks-server[:port]] \n"
-"          [-T proxy-server[:port]]\n"
-"          [-c telnet-proxy-command]\n"
+"          [-S [user@]socks-server[:port]] \n"
 "          host port\n";
 
 /* name of this program */
@@ -270,8 +242,6 @@ int   local_type = LOCAL_STDIO;
 u_short local_port = 0;                         /* option 'p' */
 int f_hold_session = 0;                         /* option 'P' */
 
-char *telnet_command = "telnet %h %p";
-
 /* utiity types, pair holder of number and string */
 typedef struct {
     int num;
@@ -282,9 +252,7 @@ typedef struct {
 #define METHOD_UNDECIDED 0
 #define METHOD_DIRECT    1
 #define METHOD_SOCKS     2
-#define METHOD_HTTP      3
-#define METHOD_TELNET    4
-char *method_names[] = { "UNDECIDED", "DIRECT", "SOCKS", "HTTP", "TELNET" };
+char *method_names[] = { "UNDECIDED", "DIRECT", "SOCKS" };
 
 int   relay_method = METHOD_UNDECIDED;          /* relaying method */
 char *relay_host = NULL;                        /* hostname of relay server */
@@ -331,19 +299,6 @@ LOOKUP_ITEM socks5_rep_names[] = {
 #define SOCKS5_AUTH_EAP         0x05    /* Extensible Authentication Proto. */
 #define SOCKS5_AUTH_MAF         0x08    /* Multi-Authentication Framework */
 
-#define SOCKS4_REP_SUCCEEDED    90      /* rquest granted (succeeded) */
-#define SOCKS4_REP_REJECTED     91      /* request rejected or failed */
-#define SOCKS4_REP_IDENT_FAIL   92      /* cannot connect identd */
-#define SOCKS4_REP_USERID       93      /* user id not matched */
-
-LOOKUP_ITEM socks4_rep_names[] = {
-    { SOCKS4_REP_SUCCEEDED,  "request granted (succeeded)"},
-    { SOCKS4_REP_REJECTED,   "request rejected or failed"},
-    { SOCKS4_REP_IDENT_FAIL, "cannot connect identd"},
-    { SOCKS4_REP_USERID,     "user id not matched"},
-    { -1, NULL }
-};
-
 #define RESOLVE_UNKNOWN 0
 #define RESOLVE_LOCAL   1
 #define RESOLVE_REMOTE  2
@@ -357,38 +312,25 @@ char *socks5_auth = NULL;
 /* Environment variable names */
 #define ENV_SOCKS_SERVER  "SOCKS_SERVER"        /* SOCKS server */
 #define ENV_SOCKS5_SERVER "SOCKS5_SERVER"
-#define ENV_SOCKS4_SERVER "SOCKS4_SERVER"
 
 #define ENV_SOCKS_RESOLVE  "SOCKS_RESOLVE"      /* resolve method */
 #define ENV_SOCKS5_RESOLVE "SOCKS5_RESOLVE"
-#define ENV_SOCKS4_RESOLVE "SOCKS4_RESOLVE"
 
 #define ENV_SOCKS5_USER     "SOCKS5_USER"       /* auth user for SOCKS5 */
-#define ENV_SOCKS4_USER     "SOCKS4_USER"       /* auth user for SOCKS4 */
 #define ENV_SOCKS_USER      "SOCKS_USER"        /* auth user for SOCKS */
 #define ENV_SOCKS5_PASSWD   "SOCKS5_PASSWD"     /* auth password for SOCKS5 */
 #define ENV_SOCKS5_PASSWORD "SOCKS5_PASSWORD"   /* old style */
-
-#define ENV_HTTP_PROXY          "HTTP_PROXY"    /* common env var */
-#define ENV_HTTP_PROXY_USER     "HTTP_PROXY_USER" /* auth user */
-#define ENV_HTTP_PROXY_PASSWORD "HTTP_PROXY_PASSWORD" /* auth password */
-
-#define ENV_TELNET_PROXY          "TELNET_PROXY"    /* common env var */
 
 #define ENV_CONNECT_USER     "CONNECT_USER"     /* default auth user name */
 #define ENV_CONNECT_PASSWORD "CONNECT_PASSWORD" /* default auth password */
 
 #define ENV_SOCKS_DIRECT   "SOCKS_DIRECT"       /* addr-list for non-proxy */
 #define ENV_SOCKS5_DIRECT  "SOCKS5_DIRECT"
-#define ENV_SOCKS4_DIRECT  "SOCKS4_DIRECT"
-#define ENV_HTTP_DIRECT    "HTTP_DIRECT"
 #define ENV_CONNECT_DIRECT "CONNECT_DIRECT"
 
 #define ENV_SOCKS5_AUTH "SOCKS5_AUTH"
 #define ENV_SSH_ASKPASS "SSH_ASKPASS"           /* askpass program */
 
-/* Prefix string of HTTP_PROXY */
-#define HTTP_PROXY_PREFIX "http://"
 #define PROXY_AUTH_NONE 0
 #define PROXY_AUTH_BASIC 1
 #define PROXY_AUTH_DIGEST 2
@@ -622,23 +564,16 @@ typedef struct {
 PARAMETER_ITEM parameter_table[] = {
     { ENV_SOCKS_SERVER, NULL },
     { ENV_SOCKS5_SERVER, NULL },
-    { ENV_SOCKS4_SERVER, NULL },
     { ENV_SOCKS_RESOLVE, NULL },
     { ENV_SOCKS5_RESOLVE, NULL },
-    { ENV_SOCKS4_RESOLVE, NULL },
     { ENV_SOCKS5_USER, NULL },
     { ENV_SOCKS5_PASSWD, NULL },
     { ENV_SOCKS5_PASSWORD, NULL },
-    { ENV_HTTP_PROXY, NULL },
-    { ENV_HTTP_PROXY_USER, NULL },
-    { ENV_HTTP_PROXY_PASSWORD, NULL },
     { ENV_CONNECT_USER, NULL },
     { ENV_CONNECT_PASSWORD, NULL },
     { ENV_SSH_ASKPASS, NULL },
     { ENV_SOCKS5_DIRECT, NULL },
-    { ENV_SOCKS4_DIRECT, NULL },
     { ENV_SOCKS_DIRECT, NULL },
-    { ENV_HTTP_DIRECT, NULL },
     { ENV_CONNECT_DIRECT, NULL },
     { ENV_SOCKS5_AUTH, NULL },
     { NULL, NULL }
@@ -1224,7 +1159,7 @@ w32_tty_readpass( const char *prompt, char *buf, size_t size )
 
 /*** User / Password ***/
 
-/* SOCKS5 and HTTP Proxy authentication may requires username and
+/* SOCKS5 Proxy authentication may requires username and
    password. We ll give it via environment variable or tty.
    Username and password for authentication are decided by
    following rules:
@@ -1299,8 +1234,7 @@ determine_relay_password ()
    1st arg, METHOD should be METHOD_xxx.
    2nd arg, SPEC is hostname or hostname:port or user@hostame:port.
    hostname is domain name or dot notation.
-   If port is omitted, use 80 for METHOD_HTTP method,
-   use 1080 for METHOD_SOCKS method.
+   If port is omitted, use 1080 for METHOD_SOCKS method.
    Username is also able to given by 3rd. format.
    2nd argument SPEC can be NULL. if NULL, use environment variable.
  */
@@ -1348,31 +1282,10 @@ set_relay( int method, char *spec )
             }
         }
         break;
-
-    case METHOD_HTTP:
-        if ( spec == NULL )
-            spec = getparam(ENV_HTTP_PROXY);
-        if ( spec == NULL )
-            fatal("You must specify http proxy server\n");
-        relay_port = 80;                        /* set default first */
-        break;
-    case METHOD_TELNET:
-        if ( spec == NULL )
-            spec = getparam(ENV_TELNET_PROXY);
-        if ( spec == NULL )
-            fatal("You must specify telnet proxy server\n");
-        relay_port = 23;                        /* set default first */
     }
 
-    if (expect( spec, HTTP_PROXY_PREFIX)) {
-        /* URL format like: "http://server:port/" */
-        /* extract server:port part */
-        buf = strdup( spec + strlen(HTTP_PROXY_PREFIX));
-        buf[strcspn(buf, "/")] = '\0';
-    } else {
-        /* assume spec is aready "server:port" format */
-        buf = strdup( spec );
-    }
+    /* assume spec is aready "server:port" format */
+    buf = strdup( spec );
     spec = buf;
 
     /* check username in spec */
@@ -1446,13 +1359,6 @@ getarg( int argc, char **argv )
                 method = METHOD_DIRECT;
                 break;
 
-            case 'h':                           /* use http-proxy */
-                method = METHOD_HTTP;
-                break;
-            case 't':
-                method = METHOD_TELNET;
-                break;
-
             case 'S':                           /* specify SOCKS server */
                 if ( 1 < argc ) {
                     argv++, argc--;
@@ -1463,37 +1369,6 @@ getarg( int argc, char **argv )
                     err++;
                 }
                 break;
-
-            case 'H':                           /* specify http-proxy server */
-                if ( 1 < argc ) {
-                    argv++, argc--;
-                    method = METHOD_HTTP;
-                    server = *argv;
-                } else {
-                    error("option '-%c' needs argument.\n", *ptr);
-                    err++;
-                }
-                break;
-            case 'T':                           /* specify telnet proxy server */
-                if ( 1 < argc ) {
-                    argv++, argc--;
-                    method = METHOD_TELNET;
-                    server = *argv;
-                } else {
-                    error("option '-%c' needs argument.\n", *ptr);
-                    err++;
-                }
-                break;
-
-            case 'c':
-                 if (1 < argc) {
-                      argv++, argc--;
-                      telnet_command = *argv;
-                 } else {
-                      error("option '%c' needs argument.\n", *ptr);
-                      err++;
-                 }
-                 break;
 
             case 'P':
                 f_hold_session = 1;
@@ -2187,97 +2062,6 @@ begin_socks5_relay( SOCKET s )
 
     /* Conguraturation, connected via SOCKS5 server! */
     return 0;
-}
-
-int
-sendf(SOCKET s, const char *fmt,...)
-{
-    static char buf[10240];                     /* xxx, enough? */
-
-    va_list args;
-    va_start( args, fmt );
-    vsnprintf( buf, sizeof(buf), fmt, args );
-    va_end( args );
-
-    report_text(">>>", buf);
-    if ( send(s, buf, strlen(buf), 0) == SOCKET_ERROR ) {
-        debug("failed to send http request. errno=%d\n", socket_errno());
-        return -1;
-    }
-    return 0;
-}
-
-const char *base64_table =
-"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-char *
-make_base64_string(const char *str)
-{
-    static char *buf;
-    const char *src;
-    char *dst;
-    int bits, data, src_len, dst_len;
-    /* make base64 string */
-    src_len = strlen(str);
-    dst_len = (src_len+2)/3*4;
-    buf = xmalloc(dst_len+1);
-    bits = data = 0;
-    src = str;
-    dst = buf;
-    while ( dst_len-- ) {
-        if ( bits < 6 ) {
-            data = (data << 8) | *src;
-            bits += 8;
-            if ( *src != 0 )
-                src++;
-        }
-        *dst++ = base64_table[0x3F & (data >> (bits-6))];
-        bits -= 6;
-    }
-    *dst = '\0';
-    /* fix-up tail padding */
-    switch ( src_len%3 ) {
-    case 1:
-        *--dst = '=';
-    case 2:
-        *--dst = '=';
-    }
-    return buf;
-}
-
-int
-basic_auth (SOCKET s)
-{
-    char *userpass;
-    char *cred;
-    const char *user = relay_user;
-    char *pass = NULL;
-    int len, ret;
-
-    /* Get username/password for authentication */
-    if (user == NULL)
-        fatal("Cannot decide username for proxy authentication.");
-    if ((pass = determine_relay_password ()) == NULL &&
-        (pass = readpass("Enter proxy authentication password for %s@%s: ",
-                         relay_user, relay_host)) == NULL)
-        fatal("Cannot decide password for proxy authentication.");
-
-    len = strlen(user)+strlen(pass)+1;
-    userpass = xmalloc(len+1);
-    snprintf(userpass, len+1, "%s:%s", user, pass);
-    memset (pass, 0, strlen(pass));
-    cred = make_base64_string(userpass);
-    memset (userpass, 0, len);
-
-    f_report = 0;                               /* don't report for security */
-    ret = sendf(s, "Proxy-Authorization: Basic %s\r\n", cred);
-    f_report = 1;
-    report_text(">>>", "Proxy-Authorization: Basic xxxxx\r\n");
-
-    memset(cred, 0, strlen(cred));
-    free(cred);
-
-    return ret;
 }
 
 #ifdef _WIN32

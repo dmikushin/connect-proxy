@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.6)
 
-project(proxy-connect)
+project(connect-socks5)
 
 add_executable(${PROJECT_NAME} connect.c)
 target_compile_definitions(${PROJECT_NAME} PRIVATE SOCKLEN_T=socklen_t)
