@@ -1248,7 +1248,7 @@ getarg( int argc, char **argv )
 
             case 'P':
                 f_hold_session = 1;
-                /* without break */
+		break;
             case 'p':                          /* specify port to forward */
                 if ( 1 < argc ) {
                     argv++, argc--;
@@ -2254,6 +2254,10 @@ do_repeater:
         /* re-wait at local port without closing remote session */
         debug ("re-waiting at local port %d\n", local_port);
         local_in = local_out = accept_connection( local_port );
+        debug ("re-start relaying\n");
+        goto do_repeater;
+    }
+    else if (f_hold_session) {
         debug ("re-start relaying\n");
         goto do_repeater;
     }
